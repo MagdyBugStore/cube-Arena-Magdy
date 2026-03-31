@@ -1,6 +1,17 @@
 import { RoundedBoxGeometry, THREE } from "../vendor/three.js";
 import { makeNumberTexture } from "../render/textures.js";
 
+const TAU = Math.PI * 2;
+
+function normalizeAngleRad(angle) {
+  return ((((angle + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
+}
+
+function lerpAngleRad(from, to, t) {
+  const delta = normalizeAngleRad(to - from);
+  return normalizeAngleRad(from + delta * t);
+}
+
 function formatValueShort(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return String(value);
@@ -73,12 +84,17 @@ export class Cube {
   setYawTargetFromPointer(clientX, clientY, width, height) {
     const dx = clientX - width / 2;
     const dy = clientY - height / 2;
-    this.targetYaw = Math.atan2(dx, -dy);
+    this.targetYaw = normalizeAngleRad(Math.atan2(dx, -dy));
+  }
+
+  setYawTargetFromMove(dirX, dirZ) {
+    if (dirX === 0 && dirZ === 0) return;
+    this.targetYaw = normalizeAngleRad(Math.atan2(dirX, dirZ) + Math.PI);
   }
 
   update(dt) {
     const lerpFactor = 1 - Math.pow(0.0001, dt);
-    this.currentYaw = THREE.MathUtils.lerp(this.currentYaw, this.targetYaw, lerpFactor);
+    this.currentYaw = lerpAngleRad(this.currentYaw, this.targetYaw, lerpFactor);
     this.mesh.rotation.set(0, this.currentYaw, 0);
   }
 }
