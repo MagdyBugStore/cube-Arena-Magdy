@@ -6,6 +6,34 @@ import { THREE } from "./vendor/three.js";
 const env = new SceneEnvironment();
 const mapSize = 18;
 new GameMap({ parent: env.scene, size: mapSize });
+const keyLight = env.scene.children.find((obj) => obj?.isDirectionalLight && obj.castShadow);
+const keyLightTarget = keyLight?.target ?? new THREE.Object3D();
+if (keyLight) env.scene.add(keyLightTarget);
+const keyLightOffset = keyLight
+  ? new THREE.Vector3().subVectors(keyLight.position, keyLightTarget.position)
+  : undefined;
+const setShadowArea =
+  typeof env.setShadowArea === "function"
+    ? (size) => env.setShadowArea(size)
+    : (size) => {
+        if (!keyLight) return;
+        const half = Math.max(6, size / 2 + 1);
+        keyLight.shadow.camera.left = -half;
+        keyLight.shadow.camera.right = half;
+        keyLight.shadow.camera.top = half;
+        keyLight.shadow.camera.bottom = -half;
+        keyLight.shadow.camera.updateProjectionMatrix();
+      };
+const setShadowCenter =
+  typeof env.setShadowCenter === "function"
+    ? (x, z) => env.setShadowCenter(x, z)
+    : (x, z) => {
+        if (!keyLight || !keyLightOffset) return;
+        keyLightTarget.position.set(x, 0, z);
+        keyLight.position.copy(keyLightTarget.position).add(keyLightOffset);
+        keyLightTarget.updateMatrixWorld();
+      };
+setShadowArea(mapSize);
 
 const cubeFactory = new CubeFactory({ maxLevel: 21 });
 
@@ -15,6 +43,8 @@ const cubes = Array.from({ length: 21 }, (_, i) =>
 
 const cube = cubeFactory.createFromLevel(0, env.scene);
 cube.setPosition(0, cube.size / 2, 1);
+cube.setName("You");
+const cameraFollowOffset = new THREE.Vector3().subVectors(env.camera.position, cube.mesh.position);
 
 const sizesSum = cubes.reduce((sum, c) => sum + c.size, 0);
 const baseGap = 0.02;
@@ -54,6 +84,8 @@ addEventListener("keyup", (e) => {
 const lookRightWorld = new THREE.Vector3();
 const lookUpWorld = new THREE.Vector3();
 const lookVec = new THREE.Vector3();
+const playerForwardWorld = new THREE.Vector3();
+const playerSpeed = 2.6;
 const clickNdc = new THREE.Vector2();
 const clickRaycaster = new THREE.Raycaster();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -96,7 +128,30 @@ env.addUpdatable({
   },
 });
 
+env.addUpdatable({
+  update(dt) {
+    const yaw = cube.currentYaw;
+    playerForwardWorld.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    cube.mesh.position.addScaledVector(playerForwardWorld, playerSpeed * dt);
+
+    const half = mapSize / 2;
+    const margin = cube.size / 2;
+    cube.mesh.position.x = Math.max(-half + margin, Math.min(half - margin, cube.mesh.position.x));
+    cube.mesh.position.z = Math.max(-half + margin, Math.min(half - margin, cube.mesh.position.z));
+    cube.mesh.position.y = cube.size / 2;
+  },
+});
+
+env.addUpdatable({
+  update() {
+    env.camera.position.copy(cube.mesh.position).add(cameraFollowOffset);
+    env.camera.lookAt(cube.mesh.position.x, 0, cube.mesh.position.z);
+    setShadowCenter(cube.mesh.position.x, cube.mesh.position.z);
+  },
+});
+
 env.renderer.domElement.addEventListener("pointermove", (e) => {
+
   const lookingWithKeys =
     pressed.has("ArrowRight") ||
     pressed.has("KeyD") ||
@@ -137,12 +192,6 @@ env.renderer.domElement.addEventListener("click", (e) => {
   const half = mapSize / 2;
   const x = Math.max(-half, Math.min(half, clickPoint.x));
   const z = Math.max(-half, Math.min(half, clickPoint.z));
-
-  const marker = cubeFactory.create(1, env.scene);
-  marker.setPosition(x, marker.size / 2, z);
-  env.addUpdatable(marker);
-
-  console.log({ click: { x, y: 0, z } });
 
   const dx = x - cube.mesh.position.x;
   const dz = z - cube.mesh.position.z;

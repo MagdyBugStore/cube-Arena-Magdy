@@ -25,6 +25,10 @@ export class SceneEnvironment {
     this._raf = 0;
     this._prevT = undefined;
 
+    this.keyLight = undefined;
+    this.keyLightTarget = undefined;
+    this.keyLightOffset = new THREE.Vector3(-3.0, 5.0, 2.0);
+
     this._addLights();
     this._applyCameraSize();
 
@@ -36,7 +40,7 @@ export class SceneEnvironment {
     this.scene.add(new THREE.HemisphereLight(0x9bd7ff, 0x0b1020, 0.35));
 
     const key = new THREE.DirectionalLight(0xffe0c2, 1.1);
-    key.position.set(-3.0, 5.0, 2.0);
+    key.position.copy(this.keyLightOffset);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
     key.shadow.camera.near = 0.1;
@@ -45,11 +49,32 @@ export class SceneEnvironment {
     key.shadow.camera.right = 6;
     key.shadow.camera.top = 6;
     key.shadow.camera.bottom = -6;
+    key.target = new THREE.Object3D();
+    this.scene.add(key.target);
     this.scene.add(key);
+    this.keyLight = key;
+    this.keyLightTarget = key.target;
 
     const rim = new THREE.DirectionalLight(0x9bd7ff, 0.65);
     rim.position.set(4.5, 2.4, -2.5);
     this.scene.add(rim);
+  }
+
+  setShadowArea(size) {
+    if (!this.keyLight) return;
+    const half = Math.max(6, size / 2 + 1);
+    this.keyLight.shadow.camera.left = -half;
+    this.keyLight.shadow.camera.right = half;
+    this.keyLight.shadow.camera.top = half;
+    this.keyLight.shadow.camera.bottom = -half;
+    this.keyLight.shadow.camera.updateProjectionMatrix();
+  }
+
+  setShadowCenter(x, z) {
+    if (!this.keyLight || !this.keyLightTarget) return;
+    this.keyLightTarget.position.set(x, 0, z);
+    this.keyLight.position.copy(this.keyLightTarget.position).add(this.keyLightOffset);
+    this.keyLightTarget.updateMatrixWorld();
   }
 
   _applyCameraSize() {

@@ -32,12 +32,60 @@ function formatValueShort(value) {
   return `${sign}${numText}${units[unitIndex] ?? ""}`;
 }
 
+function makeLabelTexture(text, { width = 512, height = 256 } = {}) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.lineJoin = "round";
+
+  ctx.shadowColor = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = Math.floor(height * 0.08);
+  ctx.shadowOffsetY = Math.floor(height * 0.05);
+
+  const baseFontSize = Math.floor(height * 0.62);
+  const fontFamily = `system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+  ctx.font = `800 ${baseFontSize}px ${fontFamily}`;
+
+  const paddingX = width * 0.08;
+  const maxTextWidth = width - paddingX * 2;
+  const baseMetrics = ctx.measureText(text);
+  const widthScale = baseMetrics.width > 0 ? Math.min(1, maxTextWidth / baseMetrics.width) : 1;
+  const fontSize = Math.max(10, Math.floor(baseFontSize * widthScale));
+  ctx.font = `800 ${fontSize}px ${fontFamily}`;
+
+  const metrics = ctx.measureText(text);
+  const ascent = metrics.actualBoundingBoxAscent ?? fontSize * 0.7;
+  const descent = metrics.actualBoundingBoxDescent ?? fontSize * 0.25;
+  const textY = height / 2 + (ascent - descent) / 2;
+
+  ctx.lineWidth = Math.max(2, Math.floor(fontSize * 0.12));
+  ctx.strokeStyle = "#0b1020";
+  ctx.strokeText(text, width / 2, textY);
+
+  ctx.shadowColor = "rgba(0,0,0,0)";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(text, width / 2, textY);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export class Cube {
   constructor({ value = 1, color = "#c65b5f", size = .5, cornerRadius = 0.06, parent } = {}) {
     this.value = value;
     this.targetYaw = Math.PI / 4;
     this.currentYaw = this.targetYaw;
     this.size = size;
+    this.name = "";
+    this.nameMaterial = undefined;
+    this.nameSprite = undefined;
 
     this.mesh = new THREE.Mesh(
       new RoundedBoxGeometry(size, size, size, 8, cornerRadius),
@@ -78,6 +126,42 @@ export class Cube {
     const numberTextureSize = Math.max(256, Math.min(1024, Math.round(512 * (this.size / 1.2))));
     this.numberMaterial.map = makeNumberTexture(formatValueShort(value), { size: numberTextureSize });
     this.numberMaterial.needsUpdate = true;
+    if (oldMap) oldMap.dispose();
+  }
+
+  setName(name) {
+    const nextName = String(name ?? "");
+    if (this.name === nextName) return;
+    this.name = nextName;
+
+    if (!nextName) {
+      if (this.nameSprite) this.mesh.remove(this.nameSprite);
+      if (this.nameMaterial?.map) this.nameMaterial.map.dispose();
+      if (this.nameMaterial) this.nameMaterial.dispose();
+      this.nameSprite = undefined;
+      this.nameMaterial = undefined;
+      return;
+    }
+
+    const oldMap = this.nameMaterial?.map;
+    const texture = makeLabelTexture(nextName, { width: 512, height: 256 });
+    if (!this.nameSprite) {
+      this.nameMaterial = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthWrite: false,
+      });
+      this.nameSprite = new THREE.Sprite(this.nameMaterial);
+      this.nameSprite.position.set(0, this.size / 2 + this.size * 0.9, 0);
+      const labelH = this.size * 0.55;
+      this.nameSprite.scale.set(labelH * 2, labelH, 1);
+      this.nameSprite.renderOrder = 10;
+      this.mesh.add(this.nameSprite);
+      return;
+    }
+
+    this.nameMaterial.map = texture;
+    this.nameMaterial.needsUpdate = true;
     if (oldMap) oldMap.dispose();
   }
 
