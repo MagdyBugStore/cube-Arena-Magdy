@@ -66,6 +66,9 @@ export class Player {
     this.tailLength = tailLength;
     this.segmentSpacing = undefined;
     this.pathPointMinDist = pathPointMinDist;
+    this.knockbackVel = new THREE.Vector3();
+    this.knockbackMaxSpeed = 10;
+    this.stunTimer = 0;
 
     this.head = cubeFactory.createFromLevel(headLevel, parent);
     this.head.setName(name);
@@ -112,6 +115,32 @@ export class Player {
     const decay = Math.max(0.5, Math.min(0.99, Number(this.speedDecayPerLevel) || 0.92));
     const min = Math.max(0.1, Number(this.minSpeed) || 0.1);
     return Math.max(min, base * Math.pow(decay, level - 1));
+  }
+
+  addKnockback(dirX, dirZ, strength = 0) {
+    const x = Number(dirX);
+    const z = Number(dirZ);
+    const s = Number(strength);
+    if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(s) || s <= 0) return;
+    const len = Math.sqrt(x * x + z * z) || 1;
+    this.knockbackVel.x += (x / len) * s;
+    this.knockbackVel.z += (z / len) * s;
+    const max = Math.max(0, Number(this.knockbackMaxSpeed) || 0);
+    const kLen = Math.sqrt(this.knockbackVel.x * this.knockbackVel.x + this.knockbackVel.z * this.knockbackVel.z) || 0;
+    if (max > 0 && kLen > max) {
+      const m = max / kLen;
+      this.knockbackVel.x *= m;
+      this.knockbackVel.z *= m;
+    }
+  }
+
+  applyExplosion(dirX, dirZ, { speed = 10, stunSec = 1 } = {}) {
+    const s = Number(speed);
+    const t = Number(stunSec);
+    if (Number.isFinite(t) && t > 0) this.stunTimer = Math.max(this.stunTimer, t);
+    if (!Number.isFinite(s) || s <= 0) return;
+    this.knockbackMaxSpeed = Math.max(Number(this.knockbackMaxSpeed) || 0, s);
+    this.addKnockback(dirX, dirZ, s);
   }
 
   _spacingBetweenSizes(aSize, bSize) {
@@ -440,8 +469,14 @@ export class Player {
 
     const yaw = this.head.currentYaw;
     this.headDirection.set(-Math.sin(yaw), 0, -Math.cos(yaw));
-    const moveSpeed = this._speedForHeadValue(this.head.value);
+    if (this.stunTimer > 0) this.stunTimer = Math.max(0, this.stunTimer - dt);
+    const moveSpeed = this.stunTimer > 0 ? 0 : this._speedForHeadValue(this.head.value);
     this.head.mesh.position.addScaledVector(this.headDirection, moveSpeed * dt);
+    this.head.mesh.position.x += (this.knockbackVel.x || 0) * dt;
+    this.head.mesh.position.z += (this.knockbackVel.z || 0) * dt;
+    const damp = Math.pow(0.02, dt);
+    this.knockbackVel.x *= damp;
+    this.knockbackVel.z *= damp;
 
     const half = this.mapSize / 2;
     const margin = this.head.size / 2;

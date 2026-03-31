@@ -86,6 +86,24 @@ export class FreeCubeSpawner {
     this.cubes.push({ cube, fallSpeed: this.fallSpeed, vx, vy, vz, gravity });
   }
 
+  spawnAt({ value = 1, x = 0, z = 0 } = {}) {
+    if (!this.cubeFactory || !this.parent) return;
+    if (this.cubes.length >= this.maxCount) return;
+
+    const cube = this.cubeFactory.create(value, this.parent);
+    cube.setName("");
+    cube.mesh.rotation.y = Math.random() * Math.PI * 2;
+
+    const bounds = this._boundsForSize(cube.size);
+    cube.mesh.position.set(
+      THREE.MathUtils.clamp(x, bounds.minX, bounds.maxX),
+      cube.size / 2,
+      THREE.MathUtils.clamp(z, bounds.minZ, bounds.maxZ)
+    );
+
+    this.cubes.push({ cube, fallSpeed: 0 });
+  }
+
   spawnOne() {
     if (!this.cubeFactory || !this.parent) return;
     if (this.cubes.length >= this.maxCount) return;

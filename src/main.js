@@ -4,6 +4,8 @@ import { SceneEnvironment } from "./env/SceneEnvironment.js";
 import { FreeCubeSpawner } from "./systems/FreeCubeSpawner.js";
 import { GameMap } from "./world/GameMap.js";
 import { THREE } from "./vendor/three.js";
+import { createSparkManager } from "./render/sparks.js";
+import { EXPLOSION } from "./config/explosion.js";
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -72,6 +74,9 @@ setShadowArea(mapSize);
 
 const cubeFactory = new CubeFactory({ maxLevel: 21 });
 
+const sparks = createSparkManager(env.scene);
+env.addUpdatable(sparks);
+
 const freeCubeSpawner = new FreeCubeSpawner({
   cubeFactory,
   parent: env.scene,
@@ -82,6 +87,36 @@ const freeCubeSpawner = new FreeCubeSpawner({
   fallSpeed: 8.5,
 });
 env.addUpdatable(freeCubeSpawner);
+
+function removeTailAt(owner, index) {
+  if (!owner || typeof index !== "number") return;
+  if (typeof owner._removeTailAt === "function") {
+    owner._removeTailAt(index);
+    return;
+  }
+  const seg = owner.tail?.[index];
+  const mesh = seg?.mesh;
+  if (mesh?.parent) mesh.parent.remove(mesh);
+  if (Array.isArray(owner.tail)) owner.tail.splice(index, 1);
+}
+
+function dropSegmentAsFreeCube(seg) {
+  if (!seg?.mesh) return;
+  const v = seg.value ?? 0;
+  if (!(v > 0)) return;
+  if (typeof freeCubeSpawner.spawnAt !== "function") return;
+  freeCubeSpawner.spawnAt({ value: v, x: seg.mesh.position.x, z: seg.mesh.position.z });
+}
+
+function dropTailFromIndex(owner, startIndex) {
+  if (!owner || !Array.isArray(owner.tail) || owner.tail.length === 0) return;
+  const from = Math.max(0, startIndex | 0);
+  for (let i = owner.tail.length - 1; i >= from; i -= 1) {
+    const seg = owner.tail[i];
+    dropSegmentAsFreeCube(seg);
+    removeTailAt(owner, i);
+  }
+}
 
 const pressed = new Set();
 addEventListener("keydown", (e) => {
@@ -131,53 +166,7 @@ function chooseSpawnXZ({ mapSize, radius, avoid = [], avoidDist = 5.5, tries = 6
   return { x: randomBetween(minX, maxX), z: randomBetween(minZ, maxZ) };
 }
 
-function scatterTailOnDeath(victim) {
-  if (!victim?.head?.mesh) return;
-  if (!freeCubeSpawner || typeof freeCubeSpawner.spawnScatter !== "function") return;
-
-  const center = victim.head.mesh.position;
-  const values = [];
-  const insertValue = victim.tailInsertAnim?.value ?? victim.tailInsertAnim?.cube?.value;
-  if (Number.isFinite(insertValue) && insertValue > 0) values.push(insertValue);
-  if (Array.isArray(victim.tail)) {
-    for (const seg of victim.tail) {
-      const v = seg?.value ?? 0;
-      if (v > 0) values.push(v);
-    }
-  }
-  if (values.length === 0) return;
-
-  const maxAdd = Math.max(0, (freeCubeSpawner.maxCount ?? 0) - (freeCubeSpawner.cubes?.length ?? 0));
-  const count = Math.min(values.length, maxAdd, 28);
-  if (count <= 0) return;
-
-  const radius = 1.1 + (victim.head.size ?? 0) * 2.6;
-  for (let i = 0; i < count; i += 1) {
-    const idx = (Math.random() * values.length) | 0;
-    const v = values[idx];
-    freeCubeSpawner.spawnScatter({
-      value: v,
-      x: center.x,
-      z: center.z,
-      radius,
-      impulseMin: 1.6,
-      impulseMax: 5.0,
-      upMin: 3.2,
-      upMax: 8.8,
-    });
-  }
-}
-
-function respawnPlayer(p, { avoid = [] } = {}) {
-  const spawnValue = p.spawnHeadValue ?? 2;
-  p.setHeadValue(spawnValue);
-  p.clearTail();
-  const s = statsByPlayer.get(p);
-  if (s) {
-    s.score = 0;
-    s.kills = 0;
-    s.lastHeadValue = spawnValue;
-  }
+function placePlayer(p, { avoid = [] } = {}) {
   const { x, z } = chooseSpawnXZ({
     mapSize,
     radius: p.head.size / 2,
@@ -186,6 +175,19 @@ function respawnPlayer(p, { avoid = [] } = {}) {
   });
   p.setPosition(x, p.head.size / 2, z);
   p.setLookDirFromMove(Math.random() - 0.5, Math.random() - 0.5);
+}
+
+function respawnPlayer(p, { avoid = [] } = {}) {
+  const spawnValue = 2;
+  p.setHeadValue(spawnValue);
+  p.clearTail();
+  const s = statsByPlayer.get(p);
+  if (s) {
+    s.score = 0;
+    s.kills = 0;
+    s.lastHeadValue = spawnValue;
+  }
+  placePlayer(p, { avoid });
 }
 
 function spawnInFrontOfPlayer(p, forwardX, forwardZ, { distMin = 8, distMax = 14, spread = 6 } = {}) {
@@ -203,8 +205,9 @@ function spawnInFrontOfPlayer(p, forwardX, forwardZ, { distMin = 8, distMax = 14
 
 const baseSpeedAt2 = 2.6;
 const player = new Player({ cubeFactory, parent: env.scene, mapSize, name: "You", speed: baseSpeedAt2, tailLength: 0, headLevel: 1 });
-player.spawnHeadValue = player.head.value ?? 2;
 player.setPosition(0, player.head.size / 2, 1);
+if (player.head?.mesh) player.head.mesh.visible = false;
+const defaultCameraPos = env.camera.position.clone();
 const defaultCameraFollowOffset = new THREE.Vector3().subVectors(env.camera.position, player.head.mesh.position);
 const cameraFollowOffset = defaultCameraFollowOffset.clone();
 let playerJoined = false;
@@ -259,7 +262,6 @@ for (let i = 0; i < botCount; i += 1) {
     headLevel,
     tailLevel: 0,
   });
-  bot.spawnHeadValue = bot.head.value ?? 2;
   getStats(bot);
   bot.ai = {
     timer: randomBetween(0.05, 0.35),
@@ -275,7 +277,7 @@ for (let i = 0; i < botCount; i += 1) {
   };
   bots.push(bot);
   players.push(bot);
-  respawnPlayer(bot, { avoid: players.filter((p) => p !== bot) });
+  placePlayer(bot, { avoid: players.filter((p) => p !== bot) });
 }
 
 env.addUpdatable({
@@ -531,6 +533,22 @@ function resolvePlayerVsFreeCubes(p) {
 }
 
 const tmpPush = new THREE.Vector3();
+const tmpV3A = new THREE.Vector3();
+const tmpV3B = new THREE.Vector3();
+const tmpV3C = new THREE.Vector3();
+const headHeadCooldown = new Map();
+const tailTouchCooldown = new WeakMap();
+function pairKey(a, b) {
+  const au = a?.head?.mesh?.uuid ?? "";
+  const bu = b?.head?.mesh?.uuid ?? "";
+  return String(au) < String(bu) ? `${au}|${bu}` : `${bu}|${au}`;
+}
+function randomizeDir(nx, nz, amount) {
+  const rx = nx + (Math.random() - 0.5) * amount;
+  const rz = nz + (Math.random() - 0.5) * amount;
+  const len = Math.sqrt(rx * rx + rz * rz) || 1;
+  return { x: rx / len, z: rz / len };
+}
 env.addUpdatable({
   update() {
     for (const p of players) resolvePlayerVsFreeCubes(p);
@@ -554,17 +572,14 @@ env.addUpdatable({
             const dx = eaterPos.x - seg.mesh.position.x;
             const dz = eaterPos.z - seg.mesh.position.z;
             const r = eaterSize / 2 + (seg.size ?? 0) / 2 + 0.01;
+            const contactGap = r + EXPLOSION.contactGap;
             const d2xz = dx * dx + dz * dz;
-            if (d2xz >= r * r) continue;
+            if (d2xz >= contactGap * contactGap) continue;
 
             const segValue = seg.value ?? 0;
             if (segValue <= eaterValue) {
-              if (typeof owner._removeTailAt === "function") owner._removeTailAt(segIndex);
-              else {
-                const mesh = seg.mesh;
-                if (mesh?.parent) mesh.parent.remove(mesh);
-                owner.tail.splice(segIndex, 1);
-              }
+              dropTailFromIndex(owner, segIndex + 1);
+              removeTailAt(owner, segIndex);
               eater.enqueueTailValue(segValue);
               getStats(eater).score += Math.max(0, segValue);
               eatenThisFrame += 1;
@@ -574,7 +589,6 @@ env.addUpdatable({
 
             const dist = Math.sqrt(Math.max(1e-8, d2xz));
             const penetration = r - dist + 0.02;
-            if (penetration <= 0) continue;
 
             let nx = dx / dist;
             let nz = dz / dist;
@@ -587,10 +601,23 @@ env.addUpdatable({
 
             const half = mapSize / 2;
             const margin = eaterSize / 2;
-            eaterPos.x = clamp(eaterPos.x + nx * penetration, -half + margin, half - margin);
-            eaterPos.z = clamp(eaterPos.z + nz * penetration, -half + margin, half - margin);
-            eaterPos.y = eaterSize / 2;
-            eater.setLookDirFromMove(nx, nz);
+            if (penetration > 0) {
+              eaterPos.x = clamp(eaterPos.x + nx * penetration, -half + margin, half - margin);
+              eaterPos.z = clamp(eaterPos.z + nz * penetration, -half + margin, half - margin);
+              eaterPos.y = eaterSize / 2;
+            }
+
+            const now = performance.now() * 0.001;
+            const last = tailTouchCooldown.get(eater) ?? -1e9;
+            if (now - last > 0.08) {
+              tailTouchCooldown.set(eater, now);
+              const contact = Math.max(0, contactGap - dist);
+              const intensity = 1.0 + Math.min(4.2, contact * 16);
+              sparks.spawnBurst({ x: seg.mesh.position.x, y: 0.5, z: seg.mesh.position.z, intensity });
+              eater.applyExplosion(nx, nz, { speed: 10, stunSec: 1 });
+              const d = randomizeDir(nx, nz, 1.05 + intensity * 0.35);
+              eater.setLookDirFromMove(d.x, d.z);
+            }
           }
 
           if (eatenThisFrame >= 2) break;
@@ -613,7 +640,8 @@ env.addUpdatable({
         const dz = bPos.z - aPos.z;
         const r = (a.head.size + b.head.size) / 2;
         const d2 = dx * dx + dz * dz;
-        if (d2 >= r * r || d2 < 1e-10) continue;
+        const contactGap = r + EXPLOSION.contactGap;
+        if (d2 >= contactGap * contactGap || d2 < 1e-10) continue;
 
         const aValue = a.head.value ?? 0;
         const bValue = b.head.value ?? 0;
@@ -625,8 +653,12 @@ env.addUpdatable({
           const eaterStats = getStats(eater);
           eaterStats.kills += 1;
           eaterStats.score += Math.max(0, victimValue) * 2;
-          scatterTailOnDeath(victim);
-          respawnPlayer(victim, { avoid: players.filter((p) => p !== victim) });
+          dropTailFromIndex(victim, 0);
+          if (victim === player) {
+            leaveArena();
+          } else {
+            respawnPlayer(victim, { avoid: players.filter((p) => p !== victim) });
+          }
           continue;
         }
 
@@ -634,15 +666,32 @@ env.addUpdatable({
         const penetration = r - dist + 0.02;
         const nx = dx / dist;
         const nz = dz / dist;
-        tmpPush.set(nx, 0, nz).multiplyScalar(penetration * 0.5);
+        if (penetration > 0) {
+          const impulse = Math.min(12, Math.max(0, penetration) * 26);
+          a.addKnockback(-nx, -nz, impulse);
+          b.addKnockback(nx, nz, impulse);
+        }
 
-        const half = mapSize / 2;
-        const aMargin = a.head.size / 2;
-        const bMargin = b.head.size / 2;
-        aPos.x = clamp(aPos.x - tmpPush.x, -half + aMargin, half - aMargin);
-        aPos.z = clamp(aPos.z - tmpPush.z, -half + aMargin, half - aMargin);
-        bPos.x = clamp(bPos.x + tmpPush.x, -half + bMargin, half - bMargin);
-        bPos.z = clamp(bPos.z + tmpPush.z, -half + bMargin, half - bMargin);
+        const now = performance.now() * 0.001;
+        const key = pairKey(a, b);
+        const last = headHeadCooldown.get(key) ?? -1e9;
+        if (now - last > EXPLOSION.headHeadCooldownSec) {
+          headHeadCooldown.set(key, now);
+          const aPos = a.head.mesh.position;
+          const bPos = b.head.mesh.position;
+          const mx = (aPos.x + bPos.x) / 2;
+          const mz = (aPos.z + bPos.z) / 2;
+          const contact = Math.max(0, contactGap - dist);
+          const intensity = 1.2 + Math.min(5.2, contact * 18);
+          sparks.spawnBurst({ x: mx, y: 0.6, z: mz, intensity });
+
+          a.applyExplosion(-nx, -nz, { speed: 10, stunSec: 1 });
+          b.applyExplosion(nx, nz, { speed: 10, stunSec: 1 });
+          const dirA = randomizeDir(-nx, -nz, 1.1 + intensity * 0.35);
+          const dirB = randomizeDir(nx, nz, 1.1 + intensity * 0.35);
+          a.setLookDirFromMove(dirA.x, dirA.z);
+          b.setLookDirFromMove(dirB.x, dirB.z);
+        }
       }
     }
   },
@@ -741,21 +790,46 @@ env.renderer.domElement.addEventListener("click", (e) => {
 
 const startOverlay = document.getElementById("startOverlay");
 const startButton = document.getElementById("startButton");
-let started = false;
+
+function showStartOverlay() {
+  if (startOverlay) startOverlay.style.display = "grid";
+}
+
+function hideStartOverlay() {
+  if (startOverlay) startOverlay.style.display = "none";
+}
+
+function joinArena() {
+  if (playerJoined) return;
+  respawnPlayer(player, { avoid: players });
+  if (player.head?.mesh) player.head.mesh.visible = true;
+  players.unshift(player);
+  env.addUpdatable(player);
+  cameraFollowOffset.copy(defaultCameraFollowOffset);
+  env.camera.position.copy(player.head.mesh.position).add(cameraFollowOffset);
+  env.camera.lookAt(player.head.mesh.position.x, 0, player.head.mesh.position.z);
+  playerJoined = true;
+}
+
+function leaveArena() {
+  if (!playerJoined) return;
+  playerJoined = false;
+  const idx = players.indexOf(player);
+  if (idx >= 0) players.splice(idx, 1);
+  if (env.updatables?.delete) env.updatables.delete(player);
+  dropTailFromIndex(player, 0);
+  if (typeof player.clearTail === "function") player.clearTail();
+  if (player.head?.mesh) player.head.mesh.visible = false;
+  pressed.clear();
+  env.camera.position.copy(defaultCameraPos);
+  env.camera.lookAt(0, 0, 0);
+  setShadowCenter(0, 0);
+  showStartOverlay();
+}
 
 function startGame() {
-  if (started) return;
-  started = true;
-  if (startOverlay) startOverlay.style.display = "none";
-  if (!playerJoined) {
-    respawnPlayer(player, { avoid: players });
-    players.unshift(player);
-    env.addUpdatable(player);
-    cameraFollowOffset.copy(defaultCameraFollowOffset);
-    env.camera.position.copy(player.head.mesh.position).add(cameraFollowOffset);
-    env.camera.lookAt(player.head.mesh.position.x, 0, player.head.mesh.position.z);
-    playerJoined = true;
-  }
+  hideStartOverlay();
+  joinArena();
 }
 
 if (startButton) startButton.addEventListener("click", startGame);
