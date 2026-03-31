@@ -1,4 +1,5 @@
 import { CubeFactory } from "./entities/CubeFactory.js";
+import { Player } from "./entities/Player.js";
 import { SceneEnvironment } from "./env/SceneEnvironment.js";
 import { GameMap } from "./world/GameMap.js";
 import { THREE } from "./vendor/three.js";
@@ -41,10 +42,9 @@ const cubes = Array.from({ length: 21 }, (_, i) =>
   cubeFactory.createFromLevel(i, env.scene),
 );
 
-const cube = cubeFactory.createFromLevel(0, env.scene);
-cube.setPosition(0, cube.size / 2, 1);
-cube.setName("You");
-const cameraFollowOffset = new THREE.Vector3().subVectors(env.camera.position, cube.mesh.position);
+const player = new Player({ cubeFactory, parent: env.scene, mapSize, name: "You", speed: 2.6, tailLength: 8 });
+player.setPosition(0, player.head.size / 2, 1);
+const cameraFollowOffset = new THREE.Vector3().subVectors(env.camera.position, player.head.mesh.position);
 
 const sizesSum = cubes.reduce((sum, c) => sum + c.size, 0);
 const baseGap = 0.02;
@@ -69,7 +69,7 @@ cubes.forEach((cube) => {
   env.addUpdatable(cube);
 });
 
-env.addUpdatable(cube);
+env.addUpdatable(player);
 
 const pressed = new Set();
 addEventListener("keydown", (e) => {
@@ -84,8 +84,6 @@ addEventListener("keyup", (e) => {
 const lookRightWorld = new THREE.Vector3();
 const lookUpWorld = new THREE.Vector3();
 const lookVec = new THREE.Vector3();
-const playerForwardWorld = new THREE.Vector3();
-const playerSpeed = 2.6;
 const clickNdc = new THREE.Vector2();
 const clickRaycaster = new THREE.Raycaster();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -123,30 +121,16 @@ env.addUpdatable({
     const len = lookVec.length() || 1;
     const lookX = lookVec.x / len;
     const lookZ = lookVec.z / len;
-    cube.setYawTargetFromMove(lookX, lookZ);
+    player.setLookDirFromMove(lookX, lookZ);
 
-  },
-});
-
-env.addUpdatable({
-  update(dt) {
-    const yaw = cube.currentYaw;
-    playerForwardWorld.set(-Math.sin(yaw), 0, -Math.cos(yaw));
-    cube.mesh.position.addScaledVector(playerForwardWorld, playerSpeed * dt);
-
-    const half = mapSize / 2;
-    const margin = cube.size / 2;
-    cube.mesh.position.x = Math.max(-half + margin, Math.min(half - margin, cube.mesh.position.x));
-    cube.mesh.position.z = Math.max(-half + margin, Math.min(half - margin, cube.mesh.position.z));
-    cube.mesh.position.y = cube.size / 2;
   },
 });
 
 env.addUpdatable({
   update() {
-    env.camera.position.copy(cube.mesh.position).add(cameraFollowOffset);
-    env.camera.lookAt(cube.mesh.position.x, 0, cube.mesh.position.z);
-    setShadowCenter(cube.mesh.position.x, cube.mesh.position.z);
+    env.camera.position.copy(player.head.mesh.position).add(cameraFollowOffset);
+    env.camera.lookAt(player.head.mesh.position.x, 0, player.head.mesh.position.z);
+    setShadowCenter(player.head.mesh.position.x, player.head.mesh.position.z);
   },
 });
 
@@ -175,9 +159,9 @@ env.renderer.domElement.addEventListener("pointermove", (e) => {
   const x = Math.max(-half, Math.min(half, clickPoint.x));
   const z = Math.max(-half, Math.min(half, clickPoint.z));
 
-  const dx = x - cube.mesh.position.x;
-  const dz = z - cube.mesh.position.z;
-  cube.setYawTargetFromMove(dx, dz);
+  const dx = x - player.head.mesh.position.x;
+  const dz = z - player.head.mesh.position.z;
+  player.setLookDirFromMove(dx, dz);
 });
 
 env.renderer.domElement.addEventListener("click", (e) => {
@@ -193,9 +177,9 @@ env.renderer.domElement.addEventListener("click", (e) => {
   const x = Math.max(-half, Math.min(half, clickPoint.x));
   const z = Math.max(-half, Math.min(half, clickPoint.z));
 
-  const dx = x - cube.mesh.position.x;
-  const dz = z - cube.mesh.position.z;
-  cube.setYawTargetFromMove(dx, dz);
+  const dx = x - player.head.mesh.position.x;
+  const dz = z - player.head.mesh.position.z;
+  player.setLookDirFromMove(dx, dz);
 });
 
 env.start();
