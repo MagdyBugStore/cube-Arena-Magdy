@@ -2,10 +2,11 @@ import { THREE } from "../vendor/three.js";
 import { makeDottedGroundTexture } from "../render/textures.js";
 
 export class GameMap {
-  constructor({ size = 18, thickness = 1.6, dotTexture = makeDottedGroundTexture(), parent } = {}) {
+  constructor({ size = 18, thickness = 1.6, dotTexture, parent } = {}) {
     this.group = new THREE.Group();
 
-    const groundTop = new THREE.MeshBasicMaterial({ map: dotTexture });
+    const texture = dotTexture ?? makeDottedGroundTexture({ repeat: (size / 18) * 7 });
+    const groundTop = new THREE.MeshBasicMaterial({ map: texture });
     const groundSide = new THREE.MeshPhongMaterial({ color: 0x122e4b });
 
     const ground = new THREE.Mesh(new THREE.BoxGeometry(size, thickness, size), [

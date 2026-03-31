@@ -1,6 +1,6 @@
 import { THREE } from "../vendor/three.js";
 
-export function makeDottedGroundTexture({ size = 1024, cell = 100, dotSize = 5.0, dotRadius } = {}) {
+export function makeDottedGroundTexture({ size = 1024, cell = 100, dotSize = 5.0, dotRadius, repeat = 7 } = {}) {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
@@ -23,7 +23,7 @@ export function makeDottedGroundTexture({ size = 1024, cell = 100, dotSize = 5.0
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(7, 7);
+  texture.repeat.set(repeat, repeat);
   texture.magFilter = THREE.LinearFilter;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.anisotropy = 16;

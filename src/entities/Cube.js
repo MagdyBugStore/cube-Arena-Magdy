@@ -83,6 +83,7 @@ export class Cube {
     this.targetYaw = Math.PI / 4;
     this.currentYaw = this.targetYaw;
     this.size = size;
+    this._baseGeometrySize = size;
     this.name = "";
     this.nameMaterial = undefined;
     this.nameSprite = undefined;
@@ -120,11 +121,40 @@ export class Cube {
   }
 
   setValue(value) {
-    if (this.value === value) return;
-    this.value = value;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+    if (this.value === n) return;
+    this.value = n;
+
+    const palette = Array.isArray(this._palette) ? this._palette : null;
+    if (palette && palette.length > 0 && this.mesh?.material?.color) {
+      const clamped = Math.max(1, n);
+      const exp = Math.max(0, Math.floor(Math.log2(clamped)));
+      const color = palette[exp % palette.length];
+      this.mesh.material.color.set(color);
+    }
+
+    const baseSize = Number(this._baseSize);
+    const sizeStep = Number(this._sizeStep);
+    const maxLevel = Number(this._maxLevel);
+    if (Number.isFinite(baseSize) && Number.isFinite(sizeStep) && Number.isFinite(maxLevel)) {
+      const clamped = Math.max(1, n);
+      const lvl = Math.max(0, Math.min(maxLevel, Math.floor(Math.log2(clamped))));
+      const nextSize = baseSize + sizeStep * lvl;
+      const baseGeomSize = this._baseGeometrySize || this.size || nextSize;
+      if (baseGeomSize > 0 && nextSize > 0 && nextSize !== this.size) {
+        this.size = nextSize;
+        this.level = lvl;
+        const s = nextSize / baseGeomSize;
+        this.mesh.scale.setScalar(s);
+      } else {
+        this.level = lvl;
+      }
+    }
+
     const oldMap = this.numberMaterial.map;
-    const numberTextureSize = Math.max(256, Math.min(1024, Math.round(512 * (this.size / 1.2))));
-    this.numberMaterial.map = makeNumberTexture(formatValueShort(value), { size: numberTextureSize });
+    const numberTextureSize = Math.max(256, Math.min(1024, Math.round(512 * ((this.size || 1) / 1.2))));
+    this.numberMaterial.map = makeNumberTexture(formatValueShort(n), { size: numberTextureSize });
     this.numberMaterial.needsUpdate = true;
     if (oldMap) oldMap.dispose();
   }

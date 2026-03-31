@@ -24,6 +24,7 @@ export class SceneEnvironment {
     this.updatables = new Set();
     this._raf = 0;
     this._prevT = undefined;
+    this.paused = false;
 
     this.keyLight = undefined;
     this.keyLightTarget = undefined;
@@ -99,9 +100,20 @@ export class SceneEnvironment {
     if (obj && typeof obj.update === "function") this.updatables.add(obj);
   }
 
+  setPaused(paused) {
+    this.paused = Boolean(paused);
+  }
+
   start() {
     if (this._raf) return;
     const tick = (t) => {
+      if (this.paused) {
+        this._prevT = t;
+        this.renderer.render(this.scene, this.camera);
+        this._raf = requestAnimationFrame(tick);
+        return;
+      }
+
       const dt = Math.min(0.05, (t - (this._prevT ?? t)) * 0.001);
       this._prevT = t;
 
