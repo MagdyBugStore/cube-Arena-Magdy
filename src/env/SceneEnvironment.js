@@ -25,6 +25,7 @@ export class SceneEnvironment {
     this._raf = 0;
     this._prevT = undefined;
     this.paused = false;
+    this.customRender = null;
 
     this.keyLight = undefined;
     this.keyLightTarget = undefined;
@@ -109,7 +110,11 @@ export class SceneEnvironment {
     const tick = (t) => {
       if (this.paused) {
         this._prevT = t;
-        this.renderer.render(this.scene, this.camera);
+        if (typeof this.customRender === "function") {
+          this.customRender({ renderer: this.renderer, scene: this.scene, camera: this.camera, dt: 0, t });
+        } else {
+          this.renderer.render(this.scene, this.camera);
+        }
         this._raf = requestAnimationFrame(tick);
         return;
       }
@@ -118,7 +123,11 @@ export class SceneEnvironment {
       this._prevT = t;
 
       for (const obj of this.updatables) obj.update(dt, t);
-      this.renderer.render(this.scene, this.camera);
+      if (typeof this.customRender === "function") {
+        this.customRender({ renderer: this.renderer, scene: this.scene, camera: this.camera, dt, t });
+      } else {
+        this.renderer.render(this.scene, this.camera);
+      }
 
       this._raf = requestAnimationFrame(tick);
     };

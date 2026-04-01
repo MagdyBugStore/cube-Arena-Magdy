@@ -73,6 +73,49 @@
         text-align: left;
         font-variant-numeric: tabular-nums;
       }
+      #topCenter {
+        position: fixed;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 30;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        pointer-events: none;
+        color: rgba(255, 255, 255, 0.92);
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        user-select: none;
+      }
+      #aliveCounter {
+        min-width: 190px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(10, 18, 32, 0.62);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        backdrop-filter: blur(8px);
+        font-weight: 900;
+        letter-spacing: 0.2px;
+        text-align: center;
+      }
+      #killFeed {
+        width: min(520px, calc(100vw - 28px));
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+      .killItem {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(10, 18, 32, 0.52);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        backdrop-filter: blur(8px);
+        font-weight: 800;
+        text-align: center;
+      }
       #startOverlay {
         position: fixed;
         inset: 0;
@@ -103,6 +146,40 @@
         margin: 0 0 14px;
         font-weight: 650;
       }
+      #endLeaderboard {
+        margin: 10px 0 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        text-align: right;
+      }
+      .lbTitle {
+        font-weight: 900;
+        opacity: 0.95;
+        text-align: center;
+      }
+      .lbRow {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        font-weight: 850;
+        font-variant-numeric: tabular-nums;
+      }
+      .lbLeft {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        opacity: 0.95;
+      }
+      .lbRight {
+        opacity: 0.9;
+        white-space: nowrap;
+      }
       #startButton {
         appearance: none;
         border: 0;
@@ -125,8 +202,13 @@
       <div id="startCard">
         <h2 id="startTitle">ابدأ المباراة</h2>
         <p id="startHint">اضغط ابدأ أو اضغط Space</p>
+        <div id="endLeaderboard"></div>
         <button id="startButton" type="button">ابدأ</button>
       </div>
+    </div>
+    <div id="topCenter" dir="rtl">
+      <div id="aliveCounter"></div>
+      <div id="killFeed"></div>
     </div>
     <div id="hud" dir="rtl">
       <div class="title">أفضل 5 لاعبين</div>

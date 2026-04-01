@@ -45,7 +45,7 @@ export class Player {
     mapSize = 18,
     name = "You",
     speed = 2.6,
-    speedDecayPerLevel = 0.92,
+    speedDecayPerLevel = 0.99, // speed per level decay
     minSpeed = 1.25,
     pathPointMinDist = 0.22,
     tailLength = 8,
@@ -108,13 +108,13 @@ export class Player {
     this._headBaseScale = this.head.mesh?.scale?.x ?? 1;
   }
 
-  _speedForHeadValue(value) {
-    const v = Math.max(2, Number(value) || 2);
-    const level = Math.max(1, Math.round(Math.log2(v)));
+  _speedForHeadLevel(level) {
+    const lvl = Math.max(1, Math.floor(Number(level) || 1));
     const base = Number(this.speed) || 0;
-    const decay = Math.max(0.5, Math.min(0.99, Number(this.speedDecayPerLevel) || 0.92));
+    const decay = clamp(Number(this.speedDecayPerLevel) || 0.99, 0.95, 0.9999);
     const min = Math.max(0.1, Number(this.minSpeed) || 0.1);
-    return Math.max(min, base * Math.pow(decay, level - 1));
+
+    return Math.max(min, base * Math.pow(decay, lvl - 1));
   }
 
   addKnockback(dirX, dirZ, strength = 0) {
@@ -470,7 +470,7 @@ export class Player {
     const yaw = this.head.currentYaw;
     this.headDirection.set(-Math.sin(yaw), 0, -Math.cos(yaw));
     if (this.stunTimer > 0) this.stunTimer = Math.max(0, this.stunTimer - dt);
-    const moveSpeed = this.stunTimer > 0 ? 0 : this._speedForHeadValue(this.head.value);
+    const moveSpeed = this.stunTimer > 0 ? 0 : this._speedForHeadLevel(this.head.level);
     this.head.mesh.position.addScaledVector(this.headDirection, moveSpeed * dt);
     this.head.mesh.position.x += (this.knockbackVel.x || 0) * dt;
     this.head.mesh.position.z += (this.knockbackVel.z || 0) * dt;
