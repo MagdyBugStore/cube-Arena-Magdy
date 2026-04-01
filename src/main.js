@@ -18,6 +18,8 @@ const BOT_KILL_ALL = URL_PARAMS.has("killall")
   : BOT_OBJECTIVE === ""
     ? true
     : BOT_OBJECTIVE === "killall" || BOT_OBJECTIVE === "kill";
+const LLM_MODE = String(URL_PARAMS.get("llm") ?? "").trim().toLowerCase();
+const LLM_BOT_INDEX = Math.max(0, Number(URL_PARAMS.get("llmbot") ?? 0) || 0);
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -225,6 +227,8 @@ function createBrain() {
   return {
     personality,
     objective: BOT_KILL_ALL ? "killAll" : "normal",
+    llmMode: LLM_MODE || "off",
+    llmNextAtSec: 0,
     plan: null,
     pendingInterrupt: null,
     nextThinkAtSec: 0,
@@ -305,7 +309,7 @@ const freeCubeSpawner = new FreeCubeSpawner({
 });
 env.addUpdatable(freeCubeSpawner);
 
-const MATCH_DURATION_SEC = 120;
+const MATCH_DURATION_SEC = 3600;
 
 function removeTailAt(owner, index) {
   if (!owner || typeof index !== "number") return;
@@ -735,6 +739,13 @@ function isBotTracked(bot) {
   return bots[0] === bot;
 }
 
+function isLLMBot(bot) {
+  if (!bot) return false;
+  if (!Array.isArray(bots) || bots.length === 0) return false;
+  const idx = clamp(LLM_BOT_INDEX | 0, 0, bots.length - 1);
+  return bots[idx] === bot;
+}
+
 function planKey(plan) {
   if (!plan) return "";
   return `${plan.type}|${plan.targetKind ?? ""}|${plan.targetId ?? ""}`;
@@ -1145,6 +1156,147 @@ function updatePlanTargetPos(bot, brain, nowSec) {
       plan.z = t.z;
       return;
     }
+  }
+}
+
+function findKillablePrey(bot, brain) {
+  const botPos = bot.head.mesh.position;
+  const botValue = bot.head.value ?? 0;
+  const planType = brain.plan?.type ?? null;
+  const load01 = computePlanLoad01(planType);
+  if (shouldMiss(brain, "opportunity", load01)) return null;
+  let best = null;
+  let bestScore = -Infinity;
+  for (const other of players) {
+    if (!other || other === bot || !other?.head?.mesh) continue;
+    const otherValue = other.head.value ?? 0;
+    if (otherValue <= 0 || otherValue >= botValue) continue;
+    const pos = other.head.mesh.position;
+    const dx = pos.x - botPos.x;
+    const dz = pos.z - botPos.z;
+    const d = Math.sqrt(dx * dx + dz * dz) || 0;
+    if (!isVisible(bot, brain, dx, dz, d, "opportunity")) continue;
+    const ratio = otherValue / Math.max(1, botValue);
+    const score = Math.pow(ratio, 0.9) / Math.pow(d + 0.8, 1.05);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { prey: other, id: other.head.mesh.uuid, dist: d, value: otherValue, score };
+    }
+  }
+  return best;
+}
+
+function thinkMockLLM(bot, brain, nowSec) {
+  const t0 = performance.now();
+  updatePlanTargetPos(bot, brain, nowSec);
+
+  const plan = brain.plan;
+  const planValid = isPlanTargetValid(bot, plan);
+  const commitLocked = plan && nowSec < (plan.commitUntilSec ?? 0);
+  const minThink = Math.max(0.12, brain.minThinkIntervalSec);
+
+  const planType = brain.plan?.type ?? null;
+  const load01 = computePlanLoad01(planType);
+  const threatInfo = computeThreat(bot, brain);
+  if (threatInfo && threatInfo.level > 0.92 && (!plan || plan.type !== "escape")) {
+    const pos = bot.head.mesh.position;
+    const botSize = bot.head.size ?? 0;
+    const th = threatInfo.threat;
+    if (th?.head?.mesh) {
+      const tPos = th.head.mesh.position;
+      let ax = pos.x - tPos.x;
+      let az = pos.z - tPos.z;
+      const al = Math.sqrt(ax * ax + az * az) || 1;
+      ax /= al;
+      az /= al;
+      const half = mapSize / 2;
+      const margin = botSize / 2 + 0.8;
+      const push = (3.8 + botSize * 11) * (0.9 + brain.personality.caution * 0.35);
+      setPlan(brain, nowSec, {
+        type: "escape",
+        targetKind: "point",
+        targetId: th.head.mesh.uuid,
+        x: clamp(pos.x + ax * push, -half + margin, half - margin),
+        z: clamp(pos.z + az * push, -half + margin, half - margin),
+        reason: "llm:escape",
+      });
+      brain.nextThinkAtSec = Math.max(brain.nextThinkAtSec, nowSec + minThink);
+      return;
+    }
+  }
+  if (shouldMiss(brain, "threat", load01)) threatInfo;
+
+  if (plan && planValid && commitLocked) {
+    brain.nextThinkAtSec = Math.max(brain.nextThinkAtSec, nowSec + minThink);
+    return;
+  }
+
+  const prey = findKillablePrey(bot, brain);
+  const cube = findBestFreeCube(bot, brain);
+  const tail = findBestTailToHarvest(bot, brain);
+
+  let newPlan = null;
+  let reason = "llm";
+  if (prey?.prey?.head?.mesh) {
+    newPlan = {
+      type: "hunt",
+      targetKind: "player",
+      targetId: prey.id,
+      x: prey.prey.head.mesh.position.x,
+      z: prey.prey.head.mesh.position.z,
+    };
+    reason = "llm:hunt";
+  } else if (tail?.seg?.mesh) {
+    newPlan = {
+      type: "harvestTail",
+      targetKind: "tail",
+      targetId: tail.id,
+      targetOwnerId: tail.owner?.head?.mesh?.uuid ?? null,
+      x: tail.seg.mesh.position.x,
+      z: tail.seg.mesh.position.z,
+    };
+    reason = "llm:harvest";
+  } else if (cube?.cube?.mesh) {
+    newPlan = {
+      type: "collect",
+      targetKind: "cube",
+      targetId: cube.id,
+      x: cube.cube.mesh.position.x,
+      z: cube.cube.mesh.position.z,
+    };
+    reason = "llm:collect";
+  } else {
+    const pos = bot.head.mesh.position;
+    const botSize = bot.head.size ?? 0;
+    const botDir = bot.headDirection ?? new THREE.Vector3(0, 0, -1);
+    const fwdLen = Math.sqrt((botDir.x ?? 0) ** 2 + (botDir.z ?? 0) ** 2) || 1;
+    const fx = (botDir.x ?? 0) / fwdLen;
+    const fz = (botDir.z ?? 0) / fwdLen;
+    const px = -fz;
+    const pz = fx;
+    const half = mapSize / 2;
+    const margin = botSize / 2 + 0.8;
+    const dist = randomBetween(6, 16);
+    const side = randomSign() * randomBetween(0, 7.5);
+    newPlan = {
+      type: "wander",
+      targetKind: "point",
+      targetId: null,
+      x: clamp(pos.x + fx * dist + px * side, -half + margin, half - margin),
+      z: clamp(pos.z + fz * dist + pz * side, -half + margin, half - margin),
+    };
+    reason = "llm:wander";
+  }
+
+  if (newPlan) setPlan(brain, nowSec, { ...newPlan, reason });
+  brain.llmNextAtSec = nowSec + THREE.MathUtils.lerp(0.55, 0.22, clamp01(brain.personality.reactionSpeed));
+  brain.nextThinkAtSec = Math.max(brain.nextThinkAtSec, nowSec + minThink);
+
+  if (isBotTracked(bot)) {
+    const decisionMs = performance.now() - t0;
+    console.log(
+      `[LLM-MOCK] ${getPlayerName(bot)} plan=${brain.plan?.type ?? "-"} reason=${brain.plan?.reason ?? "-"} cpu=${decisionMs.toFixed(2)}ms`,
+    );
   }
 }
 
@@ -1769,6 +1921,11 @@ env.addUpdatable({
     for (const bot of bots) {
       const brain = bot.ai;
       if (!brain) continue;
+      if (brain.llmMode === "mock" && isLLMBot(bot)) {
+        if (nowSec >= (brain.llmNextAtSec ?? 0)) thinkMockLLM(bot, brain, nowSec);
+        steerBot(bot, brain, dt);
+        continue;
+      }
       if (brain.pendingInterrupt && nowSec >= brain.pendingInterrupt.dueAtSec) {
         thinkBot(bot, brain, nowSec);
       }

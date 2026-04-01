@@ -45,7 +45,7 @@ export class Player {
     mapSize = 18,
     name = "You",
     speed = 2.6,
-    speedDecayPerLevel = 0.99, // speed per level decay
+    speedDecayPerLevel = 1.02, // speed per level decay
     minSpeed = 1.25,
     pathPointMinDist = 0.22,
     tailLength = 8,
