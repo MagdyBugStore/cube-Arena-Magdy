@@ -32,9 +32,14 @@ export class SceneEnvironment {
     this.keyLightOffset = new THREE.Vector3(-3.0, 5.0, 2.0);
 
     this._addLights();
-    this._applyCameraSize();
+    this._handleResize();
 
-    addEventListener("resize", () => this._handleResize());
+    const onResize = () => this._handleResize();
+    addEventListener("resize", onResize, { passive: true });
+    if (globalThis.visualViewport) {
+      visualViewport.addEventListener("resize", onResize, { passive: true });
+      visualViewport.addEventListener("scroll", onResize, { passive: true });
+    }
   }
 
   _addLights() {
@@ -79,8 +84,17 @@ export class SceneEnvironment {
     this.keyLightTarget.updateMatrixWorld();
   }
 
-  _applyCameraSize() {
-    const aspect = innerWidth / innerHeight;
+  _getViewportSize() {
+    const vv = globalThis.visualViewport;
+    const width = Math.max(1, Math.round(Number(vv?.width ?? innerWidth) || 1));
+    const height = Math.max(1, Math.round(Number(vv?.height ?? innerHeight) || 1));
+    return { width, height };
+  }
+
+  _applyCameraSize(width, height) {
+    const w = Math.max(1, Number(width) || 1);
+    const h = Math.max(1, Number(height) || 1);
+    const aspect = w / h;
     this.camera.left = (-this.frustum * aspect) / 2;
     this.camera.right = (this.frustum * aspect) / 2;
     this.camera.top = this.frustum / 2;
@@ -89,8 +103,10 @@ export class SceneEnvironment {
   }
 
   _handleResize() {
-    this._applyCameraSize();
-    this.renderer.setSize(innerWidth, innerHeight);
+    const { width, height } = this._getViewportSize();
+    this._applyCameraSize(width, height);
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setSize(width, height);
   }
 
   add(object3D) {

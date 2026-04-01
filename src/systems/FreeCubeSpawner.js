@@ -42,7 +42,7 @@ export class FreeCubeSpawner {
 
   _boundsForSize(size) {
     const half = this.mapSize / 2;
-    const margin = size / 2;
+    const margin = size * 0.3;
     return {
       minX: -half + margin,
       maxX: half - margin,

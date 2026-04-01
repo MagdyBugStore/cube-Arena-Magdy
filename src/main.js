@@ -265,6 +265,11 @@ function getStats(p) {
 }
 
 const env = new SceneEnvironment();
+if (env.renderer?.domElement) {
+  env.renderer.domElement.style.touchAction = "none";
+  env.renderer.domElement.style.userSelect = "none";
+  env.renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
+}
 const mapSize = 32;
 new GameMap({ parent: env.scene, size: mapSize });
 const keyLight = env.scene.children.find((obj) => obj?.isDirectionalLight && obj.castShadow);
@@ -376,18 +381,19 @@ function renderKillFeed() {
 }
 
 function renderAliveCounter() {
-  if (!aliveCounterEl) return;
+  const target = hudMatchInfoEl ?? aliveCounterEl;
+  if (!target) return;
   if (!matchTotalPlayers) {
-    aliveCounterEl.textContent = "";
+    target.textContent = "";
     return;
   }
   if (matchActive && matchEndAtSec > 0) {
     const nowSec = performance.now() * 0.001;
     const left = Math.max(0, matchEndAtSec - nowSec);
-    aliveCounterEl.textContent = `المتبقي: ${players.length} / ${matchTotalPlayers} — الوقت: ${formatTimeMMSS(left)}`;
+    target.textContent = `المتبقي: ${players.length} / ${matchTotalPlayers} — الوقت: ${formatTimeMMSS(left)}`;
     return;
   }
-  aliveCounterEl.textContent = `المتبقي: ${players.length} / ${matchTotalPlayers}`;
+  target.textContent = `المتبقي: ${players.length} / ${matchTotalPlayers}`;
 }
 
 function formatTimeMMSS(totalSec) {
@@ -560,6 +566,28 @@ const clickRaycaster = new THREE.Raycaster();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const clickPoint = new THREE.Vector3();
 let lastMoveKey = "";
+let pointerLookActive = false;
+let pointerLookId = -1;
+
+function updateLookFromClientXY(clientX, clientY) {
+  if (!playerJoined) return;
+  const rect = env.renderer.domElement.getBoundingClientRect();
+  clickNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  clickNdc.y = -(((clientY - rect.top) / rect.height) * 2 - 1);
+
+  clickRaycaster.setFromCamera(clickNdc, env.camera);
+  const hit = clickRaycaster.ray.intersectPlane(groundPlane, clickPoint);
+  if (!hit) return;
+
+  const half = mapSize / 2;
+  const margin = (player?.head?.size ?? 0) * 0.3;
+  const x = clamp(clickPoint.x, -half + margin, half - margin);
+  const z = clamp(clickPoint.z, -half + margin, half - margin);
+
+  const dx = x - player.head.mesh.position.x;
+  const dz = z - player.head.mesh.position.z;
+  player.setLookDirFromMove(dx, dz);
+}
 
 function chooseSpawnXZ({ mapSize, radius, avoid = [], avoidDist = 5.5, tries = 60 } = {}) {
   const half = mapSize / 2;
@@ -664,10 +692,13 @@ if (hudBoard) {
 function createMiniMap() {
   if (!MINIMAP_ENABLED) return null;
   const hudEl = document.getElementById("hud");
-  if (!hudEl) return null;
+  const miniHudEl = document.getElementById("minimapHud");
+  const hostEl = miniHudEl ?? hudEl;
+  if (!hostEl) return null;
 
+  const isSmall = matchMedia?.("(max-width: 600px)")?.matches ?? innerWidth <= 600;
   const wrap = document.createElement("div");
-  wrap.style.marginTop = "10px";
+  wrap.className = "minimap";
   wrap.style.display = "flex";
   wrap.style.flexDirection = "column";
   wrap.style.gap = "6px";
@@ -676,9 +707,12 @@ function createMiniMap() {
   title.textContent = "الخريطة";
   title.style.fontWeight = "900";
   title.style.opacity = "0.9";
+  title.style.userSelect = "none";
+  title.style.cursor = "pointer";
 
   const canvas = document.createElement("canvas");
-  const size = 180;
+  const size = isSmall ? 120 : 180;
+  canvas.className = "minimapCanvas";
   canvas.width = size;
   canvas.height = size;
   canvas.style.width = `${size}px`;
@@ -687,14 +721,30 @@ function createMiniMap() {
   canvas.style.background = "rgba(0, 0, 0, 0.18)";
   canvas.style.border = "1px solid rgba(255, 255, 255, 0.12)";
 
+  let collapsed = Boolean(isSmall);
+  const applyCollapsed = () => {
+    canvas.style.display = collapsed ? "none" : "block";
+    wrap.style.gap = collapsed ? "0px" : "6px";
+  };
+  applyCollapsed();
+  title.addEventListener(
+    "pointerdown",
+    (e) => {
+      e.preventDefault();
+      collapsed = !collapsed;
+      applyCollapsed();
+    },
+    { passive: false },
+  );
+
   wrap.append(title, canvas);
-  hudEl.append(wrap);
+  hostEl.append(wrap);
 
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   ctx.imageSmoothingEnabled = true;
 
-  return { canvas, ctx, size, pad: 10, nextDrawAtSec: 0 };
+  return { canvas, ctx, size, pad: 0.0, nextDrawAtSec: 0 };
 }
 
 function drawMiniMap(m, nowSec) {
@@ -704,14 +754,14 @@ function drawMiniMap(m, nowSec) {
 
   const ctx = m.ctx;
   const size = m.size;
-  const pad = m.pad;
   const half = mapSize / 2;
   const span = Math.max(1e-6, mapSize);
-  const usable = size - pad * 2;
+  const edgePad = 0.5;
+  const usable = size - edgePad * 2;
   const toMini = (x, z) => {
     const u = clamp01((x + half) / span);
     const v = clamp01((z + half) / span);
-    return { x: pad + u * usable, y: pad + (1 - v) * usable };
+    return { x: edgePad + u * usable, y: edgePad + (1 - v) * usable };
   };
 
   ctx.clearRect(0, 0, size, size);
@@ -720,7 +770,7 @@ function drawMiniMap(m, nowSec) {
 
   ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
   ctx.lineWidth = 1;
-  ctx.strokeRect(pad - 0.5, pad - 0.5, usable + 1, usable + 1);
+  ctx.strokeRect(0.5, 0.5, size - 1, size - 1);
 
   const cubes = freeCubeSpawner?.cubes;
   if (Array.isArray(cubes) && cubes.length > 0) {
@@ -741,9 +791,9 @@ function drawMiniMap(m, nowSec) {
     if (!p?.head?.mesh) continue;
     if (p.eliminated) continue;
     const pos = p.head.mesh.position;
-    const mp = toMini(pos.x, pos.z);
     const v = Math.max(1, p.head.value ?? 1);
     const r = clamp(2 + Math.log2(v) * 0.35, 2, 7.5);
+    const mp = toMini(pos.x, pos.z);
     const isYou = p === player && playerJoined;
     ctx.fillStyle = isYou ? "rgba(120, 190, 255, 0.95)" : "rgba(255, 120, 120, 0.85)";
     ctx.beginPath();
@@ -945,6 +995,11 @@ function isVisible(bot, brain, dx, dz, dist, category) {
 function clampTargetToArena(bot, planType, x, z) {
   const half = mapSize / 2;
   const size = bot?.head?.size ?? 0;
+  const edgeMargin = size * 0.3;
+  if (planType === "hunt") {
+    return { x: clamp(x, -half + edgeMargin, half - edgeMargin), z: clamp(z, -half + edgeMargin, half - edgeMargin) };
+  }
+
   const margin = size / 2 + 0.2;
   const extra =
     planType === "escape"
@@ -1894,8 +1949,20 @@ function steerBot(bot, brain, dt) {
         : 1.15 + headSize * 1.15;
   const targetNearWall =
     Math.abs(plan.x) > half - safeBase * 0.55 || Math.abs(plan.z) > half - safeBase * 0.55;
-  const safe = targetNearWall && (mode === "collect" || mode === "harvestTail") ? safeBase * 0.55 : safeBase;
-  const wallK = mode === "escape" ? 4 : mode === "collect" || mode === "harvestTail" ? 2.4 : 3.2;
+  const safe =
+    targetNearWall && (mode === "collect" || mode === "harvestTail")
+      ? safeBase * 0.55
+      : targetNearWall && mode === "hunt"
+        ? safeBase * 0.18
+        : safeBase;
+  const wallK =
+    mode === "escape"
+      ? 4
+      : mode === "collect" || mode === "harvestTail"
+        ? 2.4
+        : targetNearWall && mode === "hunt"
+          ? 0.9
+          : 3.2;
   if (pos.x > half - safe) vx -= (pos.x - (half - safe)) * wallK;
   if (pos.x < -half + safe) vx += (-half + safe - pos.x) * wallK;
   if (pos.z > half - safe) vz -= (pos.z - (half - safe)) * wallK;
@@ -2106,11 +2173,11 @@ function resolvePlayerVsFreeCubes(p) {
       }
 
       const half = mapSize / 2;
-      const margin = headSize / 2;
+      const margin = headSize * 0.3;
       headPos.x = clamp(headPos.x + nx * penetration, -half + margin, half - margin);
       headPos.z = clamp(headPos.z + nz * penetration, -half + margin, half - margin);
       headPos.y = headSize / 2;
-      p.setLookDirFromMove(nx, nz);
+      if (p !== player) p.setLookDirFromMove(nx, nz);
       continue;
     }
 
@@ -2188,7 +2255,7 @@ env.addUpdatable({
             }
 
             const half = mapSize / 2;
-            const margin = eaterSize / 2;
+            const margin = eaterSize * 0.3;
             if (penetration > 0) {
               eaterPos.x = clamp(eaterPos.x + nx * penetration, -half + margin, half - margin);
               eaterPos.z = clamp(eaterPos.z + nz * penetration, -half + margin, half - margin);
@@ -2200,7 +2267,7 @@ env.addUpdatable({
             if (now - last > 0.08) {
               tailTouchCooldown.set(eater, now);
               const d = randomizeDir(nx, nz, 0.95);
-              eater.setLookDirFromMove(d.x, d.z);
+              if (eater !== player) eater.setLookDirFromMove(d.x, d.z);
             }
           }
 
@@ -2269,8 +2336,8 @@ env.addUpdatable({
           b.applyExplosion(nx, nz, { speed: 10, stunSec: 1 });
           const dirA = randomizeDir(-nx, -nz, 1.1 + intensity * 0.35);
           const dirB = randomizeDir(nx, nz, 1.1 + intensity * 0.35);
-          a.setLookDirFromMove(dirA.x, dirA.z);
-          b.setLookDirFromMove(dirB.x, dirB.z);
+          if (a !== player) a.setLookDirFromMove(dirA.x, dirA.z);
+          if (b !== player) b.setLookDirFromMove(dirB.x, dirB.z);
         }
       }
     }
@@ -2319,54 +2386,59 @@ env.addUpdatable({
   },
 });
 
-env.renderer.domElement.addEventListener("pointermove", (e) => {
-  if (!playerJoined) return;
+env.renderer.domElement.addEventListener(
+  "pointerdown",
+  (e) => {
+    if (!playerJoined) return;
+    if (!e.isPrimary) return;
+    if (e.pointerType !== "mouse") {
+      pointerLookActive = true;
+      pointerLookId = e.pointerId;
+      env.renderer.domElement.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
+    updateLookFromClientXY(e.clientX, e.clientY);
+  },
+  { passive: false },
+);
 
-  const lookingWithKeys =
-    pressed.has("ArrowRight") ||
-    pressed.has("KeyD") ||
-    pressed.has("ArrowLeft") ||
-    pressed.has("KeyA") ||
-    pressed.has("ArrowDown") ||
-    pressed.has("KeyS") ||
-    pressed.has("ArrowUp") ||
-    pressed.has("KeyW");
-  if (lookingWithKeys) return;
+env.renderer.domElement.addEventListener(
+  "pointermove",
+  (e) => {
+    if (!playerJoined) return;
 
-  const rect = env.renderer.domElement.getBoundingClientRect();
-  clickNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  clickNdc.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    if (e.pointerType !== "mouse") {
+      if (!pointerLookActive || e.pointerId !== pointerLookId) return;
+      e.preventDefault();
+      updateLookFromClientXY(e.clientX, e.clientY);
+      return;
+    }
 
-  clickRaycaster.setFromCamera(clickNdc, env.camera);
-  const hit = clickRaycaster.ray.intersectPlane(groundPlane, clickPoint);
-  if (!hit) return;
+    const lookingWithKeys =
+      pressed.has("ArrowRight") ||
+      pressed.has("KeyD") ||
+      pressed.has("ArrowLeft") ||
+      pressed.has("KeyA") ||
+      pressed.has("ArrowDown") ||
+      pressed.has("KeyS") ||
+      pressed.has("ArrowUp") ||
+      pressed.has("KeyW");
+    if (lookingWithKeys) return;
 
-  const half = mapSize / 2;
-  const x = Math.max(-half, Math.min(half, clickPoint.x));
-  const z = Math.max(-half, Math.min(half, clickPoint.z));
+    updateLookFromClientXY(e.clientX, e.clientY);
+  },
+  { passive: false },
+);
 
-  const dx = x - player.head.mesh.position.x;
-  const dz = z - player.head.mesh.position.z;
-  player.setLookDirFromMove(dx, dz);
+env.renderer.domElement.addEventListener("pointerup", (e) => {
+  if (e.pointerId !== pointerLookId) return;
+  pointerLookActive = false;
+  pointerLookId = -1;
 });
-
-env.renderer.domElement.addEventListener("click", (e) => {
-  if (!playerJoined) return;
-  const rect = env.renderer.domElement.getBoundingClientRect();
-  clickNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  clickNdc.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-
-  clickRaycaster.setFromCamera(clickNdc, env.camera);
-  const hit = clickRaycaster.ray.intersectPlane(groundPlane, clickPoint);
-  if (!hit) return;
-
-  const half = mapSize / 2;
-  const x = Math.max(-half, Math.min(half, clickPoint.x));
-  const z = Math.max(-half, Math.min(half, clickPoint.z));
-
-  const dx = x - player.head.mesh.position.x;
-  const dz = z - player.head.mesh.position.z;
-  player.setLookDirFromMove(dx, dz);
+env.renderer.domElement.addEventListener("pointercancel", (e) => {
+  if (e.pointerId !== pointerLookId) return;
+  pointerLookActive = false;
+  pointerLookId = -1;
 });
 
 const startOverlay = document.getElementById("startOverlay");
@@ -2376,6 +2448,7 @@ const startHint = document.getElementById("startHint");
 const endLeaderboardEl = document.getElementById("endLeaderboard");
 const aliveCounterEl = document.getElementById("aliveCounter");
 const killFeedEl = document.getElementById("killFeed");
+const hudMatchInfoEl = document.getElementById("hudMatchInfo");
 
 renderAliveCounter();
 renderKillFeed();
@@ -2400,30 +2473,9 @@ env.addUpdatable({
   },
 });
 
-const pauseButton = document.createElement("button");
-pauseButton.type = "button";
-pauseButton.textContent = "Pause";
-pauseButton.style.position = "fixed";
-pauseButton.style.top = "12px";
-pauseButton.style.right = "12px";
-pauseButton.style.zIndex = "9999";
-pauseButton.style.padding = "8px 12px";
-pauseButton.style.borderRadius = "10px";
-pauseButton.style.border = "1px solid rgba(255,255,255,0.22)";
-pauseButton.style.background = "rgba(10,14,28,0.55)";
-pauseButton.style.color = "white";
-pauseButton.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
-pauseButton.style.fontSize = "14px";
-pauseButton.style.cursor = "pointer";
-pauseButton.style.backdropFilter = "blur(6px)";
-pauseButton.style.userSelect = "none";
-document.body.appendChild(pauseButton);
-
 function setPaused(paused) {
   env.setPaused(paused);
-  pauseButton.textContent = env.paused ? "Resume" : "Pause";
 }
-pauseButton.addEventListener("click", () => setPaused(!env.paused));
 
 function showStartOverlay() {
   if (startOverlay) startOverlay.style.display = "grid";

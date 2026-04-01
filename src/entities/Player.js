@@ -479,7 +479,7 @@ export class Player {
     this.knockbackVel.z *= damp;
 
     const half = this.mapSize / 2;
-    const margin = this.head.size / 2;
+    const margin = this.head.size * 0.3;
     this.head.mesh.position.x = clamp(this.head.mesh.position.x, -half + margin, half - margin);
     this.head.mesh.position.z = clamp(this.head.mesh.position.z, -half + margin, half - margin);
     this.head.mesh.position.y = this.head.size / 2;
