@@ -9,17 +9,11 @@
       body {
         height: 100%;
         margin: 0;
-        background: linear-gradient(180deg, #183b62 0%, #163857 60%, #122e4b 100%);
+        background: #122e4b;
         overflow: hidden;
       }
       canvas {
         display: block;
-      }
-      #vignette {
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        background: radial-gradient(150% 120% at 50% 40%, rgba(0,0,0,0) 0%, rgba(0,0,0,0.25) 70%, rgba(0,0,0,0.35) 100%);
       }
       #hud {
         position: fixed;
@@ -31,7 +25,6 @@
         border-radius: 14px;
         background: rgba(10, 18, 32, 0.62);
         border: 1px solid rgba(255, 255, 255, 0.12);
-        backdrop-filter: blur(8px);
         color: rgba(255, 255, 255, 0.92);
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
         line-height: 1.2;
@@ -82,7 +75,6 @@
         border-radius: 14px;
         background: rgba(10, 18, 32, 0.62);
         border: 1px solid rgba(255, 255, 255, 0.12);
-        backdrop-filter: blur(8px);
         color: rgba(255, 255, 255, 0.92);
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
         line-height: 1.2;
@@ -109,7 +101,6 @@
         border-radius: 14px;
         background: rgba(10, 18, 32, 0.62);
         border: 1px solid rgba(255, 255, 255, 0.12);
-        backdrop-filter: blur(8px);
         font-weight: 900;
         letter-spacing: 0.2px;
         text-align: center;
@@ -133,7 +124,6 @@
         border-radius: 14px;
         background: rgba(10, 18, 32, 0.52);
         border: 1px solid rgba(255, 255, 255, 0.12);
-        backdrop-filter: blur(8px);
         font-weight: 800;
         text-align: right;
       }
@@ -143,7 +133,7 @@
         z-index: 50;
         display: grid;
         place-items: center;
-        background: radial-gradient(120% 120% at 50% 45%, rgba(10, 18, 32, 0.3) 0%, rgba(10, 18, 32, 0.78) 70%, rgba(10, 18, 32, 0.92) 100%);
+        background: rgba(10, 18, 32, 0.9);
       }
       #startCard {
         width: min(420px, calc(100vw - 32px));
@@ -151,7 +141,6 @@
         border-radius: 16px;
         background: rgba(10, 18, 32, 0.78);
         border: 1px solid rgba(255, 255, 255, 0.14);
-        backdrop-filter: blur(10px);
         color: rgba(255, 255, 255, 0.92);
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
         text-align: center;
@@ -166,6 +155,35 @@
         opacity: 0.8;
         margin: 0 0 14px;
         font-weight: 650;
+      }
+      #nameRow {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 0 0 14px;
+        text-align: right;
+      }
+      #nameLabel {
+        font-weight: 850;
+        opacity: 0.92;
+        letter-spacing: 0.2px;
+      }
+      #nameInput {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 12px 12px;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(255, 255, 255, 0.92);
+        font-weight: 800;
+        outline: none;
+      }
+      #nameInput::placeholder {
+        color: rgba(255, 255, 255, 0.45);
+      }
+      #nameInput:focus {
+        border-color: rgba(120, 190, 255, 0.55);
       }
       #endLeaderboard {
         margin: 10px 0 14px;
@@ -201,19 +219,31 @@
         opacity: 0.9;
         white-space: nowrap;
       }
-      #startButton {
-        appearance: none;
-        border: 0;
-        padding: 12px 18px;
-        border-radius: 14px;
-        background: linear-gradient(180deg, rgba(120, 190, 255, 0.95) 0%, rgba(50, 160, 255, 0.95) 100%);
-        color: rgba(7, 15, 26, 0.95);
-        font-weight: 900;
-        font-size: 18px;
-        cursor: pointer;
+      #arenaRow {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin: 0 0 6px;
       }
-      #startButton:active {
-        transform: translateY(1px);
+      .arenaBtn {
+        appearance: none;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        padding: 12px 12px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(255, 255, 255, 0.92);
+        font-weight: 900;
+        font-size: 15px;
+        cursor: pointer;
+        text-align: center;
+      }
+      .arenaBtn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .arenaBtnActive {
+        border-color: rgba(120, 190, 255, 0.45);
+        background: rgba(120, 190, 255, 0.10);
       }
       @media (max-width: 600px) {
         #hud {
@@ -270,13 +300,22 @@
     </style>
   </head>
   <body>
-    <div id="vignette"></div>
     <div id="startOverlay" dir="rtl">
       <div id="startCard">
         <h2 id="startTitle">ابدأ المباراة</h2>
-        <p id="startHint">اضغط ابدأ أو اضغط Space</p>
+        <p id="startHint">ادخل User name ثم اختار الملعب</p>
+        <div id="nameRow">
+          <div id="nameLabel">User name</div>
+          <input id="nameInput" type="text" dir="auto" autocomplete="nickname" maxlength="18" placeholder="اكتب اسمك" />
+        </div>
         <div id="endLeaderboard"></div>
-        <button id="startButton" type="button">ابدأ</button>
+        <div id="arenaRow">
+          <button class="arenaBtn" type="button" data-arena="default">الشكل الحالي</button>
+          <button class="arenaBtn" type="button" data-arena="football">ملعب كورة</button>
+          <button class="arenaBtn" type="button" data-arena="tennis">ملعب تنس</button>
+          <button class="arenaBtn" type="button" data-arena="interlock">انترلوك</button>
+          <button class="arenaBtn" type="button" data-arena="geo">أرض هندسية</button>
+        </div>
       </div>
     </div>
     <div id="topCenter" dir="rtl">

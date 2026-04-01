@@ -6,7 +6,9 @@ export class SceneEnvironment {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x0b1020, 6, 22);
 
-    this.frustum = 7.5;
+    this.desktopFrustum = 7.5;
+    this.mobileFrustum = 15;
+    this.frustum = this.desktopFrustum;
     this.camera = new THREE.OrthographicCamera(0, 0, 0, 0, 0.1, 50);
     this.camera.position.set(4.2, 6.0, 4.2);
     this.camera.lookAt(0, 0.0, 0);
@@ -104,6 +106,9 @@ export class SceneEnvironment {
 
   _handleResize() {
     const { width, height } = this._getViewportSize();
+    const isPhone =
+      (matchMedia?.("(max-width: 600px), (pointer: coarse)")?.matches ?? false) || width <= 600;
+    this.frustum = isPhone ? this.mobileFrustum : this.desktopFrustum;
     this._applyCameraSize(width, height);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(width, height);

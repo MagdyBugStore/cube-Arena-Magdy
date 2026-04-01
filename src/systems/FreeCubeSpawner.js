@@ -5,6 +5,7 @@ export class FreeCubeSpawner {
     cubeFactory,
     parent,
     mapSize = 18,
+    movementBounds,
     values = [1, 2, 4, 8, 16],
     maxCount = 80,
     spawnIntervalMinSec = 0.35,
@@ -16,6 +17,7 @@ export class FreeCubeSpawner {
     this.cubeFactory = cubeFactory;
     this.parent = parent;
     this.mapSize = mapSize;
+    this.movementBounds = null;
     this.values = values;
     this.maxCount = maxCount;
     this.spawnIntervalMinSec = spawnIntervalMinSec;
@@ -26,6 +28,22 @@ export class FreeCubeSpawner {
     this.cubes = [];
     this._timerSec = 0;
     this._resetTimer();
+
+    this.setMovementBounds(movementBounds);
+  }
+
+  setMovementBounds(bounds) {
+    if (!bounds) {
+      this.movementBounds = null;
+      return;
+    }
+    const halfX = Number(bounds.halfX);
+    const halfZ = Number(bounds.halfZ);
+    if (!Number.isFinite(halfX) || !Number.isFinite(halfZ) || halfX <= 0 || halfZ <= 0) {
+      this.movementBounds = null;
+      return;
+    }
+    this.movementBounds = { halfX, halfZ };
   }
 
   _randomBetween(min, max) {
@@ -41,13 +59,15 @@ export class FreeCubeSpawner {
   }
 
   _boundsForSize(size) {
-    const half = this.mapSize / 2;
+    const b = this.movementBounds;
+    const halfX = b ? b.halfX : this.mapSize / 2;
+    const halfZ = b ? b.halfZ : this.mapSize / 2;
     const margin = size * 0.3;
     return {
-      minX: -half + margin,
-      maxX: half - margin,
-      minZ: -half + margin,
-      maxZ: half - margin,
+      minX: -halfX + margin,
+      maxX: halfX - margin,
+      minZ: -halfZ + margin,
+      maxZ: halfZ - margin,
     };
   }
 

@@ -48,6 +48,13 @@ function clamp01(v) {
   return clamp(v, 0, 1);
 }
 
+function halfBoundsFor(entity) {
+  const b = entity?.movementBounds ?? currentMovementBounds;
+  const hx = Number(b?.halfX) > 0 ? b.halfX : mapSize / 2;
+  const hz = Number(b?.halfZ) > 0 ? b.halfZ : mapSize / 2;
+  return { halfX: hx, halfZ: hz };
+}
+
 function pickWeighted(weights) {
   return pickWeightedIndex(weights);
 }
@@ -271,7 +278,55 @@ if (env.renderer?.domElement) {
   env.renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
 }
 const mapSize = 32;
-new GameMap({ parent: env.scene, size: mapSize });
+function normalizeArenaType(value) {
+  return String(value ?? "default").trim().toLowerCase() || "default";
+}
+function movementBoundsForArena(arenaType, size) {
+  const t = normalizeArenaType(arenaType);
+  const s = Math.max(1, Number(size) || 1);
+  if (t === "football" || t === "soccer") {
+    const pitchW = s * 0.92;
+    const targetAspect = 105 / 68;
+    const pitchH = pitchW / targetAspect;
+    return { halfX: pitchW / 2, halfZ: pitchH / 2 };
+  }
+  const half = s / 2;
+  return { halfX: half, halfZ: half };
+}
+function loadArenaType() {
+  try {
+    return normalizeArenaType(localStorage.getItem("arena"));
+  } catch {
+    return "default";
+  }
+}
+function saveArenaType(value) {
+  const next = normalizeArenaType(value);
+  try {
+    localStorage.setItem("arena", next);
+  } catch {
+  }
+  return next;
+}
+const arenaTypeFromUrl = new URLSearchParams(globalThis.location?.search ?? "").get("arena");
+let currentArenaType = normalizeArenaType(arenaTypeFromUrl ?? loadArenaType() ?? "default");
+let currentMovementBounds = movementBoundsForArena(currentArenaType, mapSize);
+let gameMap = new GameMap({ parent: env.scene, size: mapSize, arenaType: currentArenaType });
+function applyArenaType(nextArenaType) {
+  const next = saveArenaType(nextArenaType);
+  currentArenaType = next;
+  currentMovementBounds = movementBoundsForArena(next, mapSize);
+  if (gameMap?.group?.parent) gameMap.group.parent.remove(gameMap.group);
+  gameMap = new GameMap({ parent: env.scene, size: mapSize, arenaType: next });
+
+  const all = [];
+  if (player) all.push(player);
+  if (Array.isArray(bots)) all.push(...bots);
+  for (const p of all) {
+    if (typeof p?.setMovementBounds === "function") p.setMovementBounds(currentMovementBounds);
+  }
+  if (typeof freeCubeSpawner?.setMovementBounds === "function") freeCubeSpawner.setMovementBounds(currentMovementBounds);
+}
 const keyLight = env.scene.children.find((obj) => obj?.isDirectionalLight && obj.castShadow);
 const keyLightTarget = keyLight?.target ?? new THREE.Object3D();
 if (keyLight) env.scene.add(keyLightTarget);
@@ -310,6 +365,7 @@ const freeCubeSpawner = new FreeCubeSpawner({
   cubeFactory,
   parent: env.scene,
   mapSize,
+  movementBounds: currentMovementBounds,
   maxCount: Math.min(520, Math.round(mapSize * mapSize * 0.4)),
   spawnHeightMin: 6,
   spawnHeightMax: 12,
@@ -348,6 +404,9 @@ function eliminateFromMatch(victim, killer) {
     playerJoined = false;
     spectatorFocus = killer ?? null;
     pressed.clear();
+    if (!TEST_MODE) {
+      showDeathOverlay({ killer });
+    }
   }
 
   renderAliveCounter();
@@ -355,7 +414,11 @@ function eliminateFromMatch(victim, killer) {
   if (!matchActive) return;
   if (players.length !== 1) return;
   const winner = players[0];
-  endMatch({ winner, reasonText: "آخر لاعب" });
+  const nowSec = performance.now() * 0.001;
+  if (matchPendingEndAtSec > 0) return;
+  matchPendingWinner = winner ?? null;
+  matchPendingReasonText = "آخر لاعب";
+  matchPendingEndAtSec = nowSec + 3;
 }
 
 function addKillNotification(killer, victim) {
@@ -456,16 +519,28 @@ function renderEndLeaderboard(winner) {
   const rows = entries.slice(0, 10).map((e, idx) => {
     const row = document.createElement("div");
     row.className = "lbRow";
+    if (idx === 0) {
+      row.style.background = "rgba(255, 215, 120, 0.14)";
+      row.style.borderColor = "rgba(255, 215, 120, 0.25)";
+      row.style.fontWeight = "950";
+    }
 
     const left = document.createElement("div");
     left.className = "lbLeft";
     const winMark = e.p === winner ? " (الفائز)" : "";
     const outMark = e.eliminated ? " (خرج)" : "";
     left.textContent = `${idx + 1}) ${e.name}${winMark}${outMark}`;
+    if (idx === 0) {
+      left.style.fontFamily = `"Arial Black", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+      left.style.letterSpacing = "0.2px";
+    }
 
     const right = document.createElement("div");
     right.className = "lbRight";
     right.textContent = `${e.value} • قتلات: ${e.kills}`;
+    if (idx === 0) {
+      right.style.fontFamily = `"Arial Black", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+    }
 
     row.append(left, right);
     return row;
@@ -478,6 +553,9 @@ function endMatch({ winner, reasonText = "" } = {}) {
   if (!winner || !matchActive) return;
   matchActive = false;
   matchEndAtSec = 0;
+  matchPendingEndAtSec = 0;
+  matchPendingWinner = null;
+  matchPendingReasonText = "";
 
   spectatorFocus = winner ?? null;
   playerJoined = false;
@@ -505,6 +583,9 @@ function resetMatchWorld() {
   matchTotalPlayers = bots.length + 1;
   killFeed.length = 0;
   matchEndAtSec = performance.now() * 0.001 + MATCH_DURATION_SEC;
+  matchPendingEndAtSec = 0;
+  matchPendingWinner = null;
+  matchPendingReasonText = "";
 
   players.length = 0;
   for (const bot of bots) {
@@ -579,23 +660,24 @@ function updateLookFromClientXY(clientX, clientY) {
   const hit = clickRaycaster.ray.intersectPlane(groundPlane, clickPoint);
   if (!hit) return;
 
-  const half = mapSize / 2;
+  const { halfX: half, halfZ: halfZ } = halfBoundsFor(player);
   const margin = (player?.head?.size ?? 0) * 0.3;
   const x = clamp(clickPoint.x, -half + margin, half - margin);
-  const z = clamp(clickPoint.z, -half + margin, half - margin);
+  const z = clamp(clickPoint.z, -halfZ + margin, halfZ - margin);
 
   const dx = x - player.head.mesh.position.x;
   const dz = z - player.head.mesh.position.z;
   player.setLookDirFromMove(dx, dz);
 }
 
-function chooseSpawnXZ({ mapSize, radius, avoid = [], avoidDist = 5.5, tries = 60 } = {}) {
-  const half = mapSize / 2;
+function chooseSpawnXZ({ mapSize, bounds, radius, avoid = [], avoidDist = 5.5, tries = 60 } = {}) {
+  const halfX = Number(bounds?.halfX) > 0 ? bounds.halfX : mapSize / 2;
+  const halfZ = Number(bounds?.halfZ) > 0 ? bounds.halfZ : mapSize / 2;
   const margin = radius;
-  const minX = -half + margin;
-  const maxX = half - margin;
-  const minZ = -half + margin;
-  const maxZ = half - margin;
+  const minX = -halfX + margin;
+  const maxX = halfX - margin;
+  const minZ = -halfZ + margin;
+  const maxZ = halfZ - margin;
   const avoidDistSq = avoidDist * avoidDist;
 
   for (let i = 0; i < tries; i += 1) {
@@ -621,6 +703,7 @@ function chooseSpawnXZ({ mapSize, radius, avoid = [], avoidDist = 5.5, tries = 6
 function placePlayer(p, { avoid = [] } = {}) {
   const { x, z } = chooseSpawnXZ({
     mapSize,
+    bounds: p?.movementBounds ?? currentMovementBounds,
     radius: p.head.size / 2,
     avoid,
     avoidDist: 6.5 + p.head.size * 4,
@@ -643,20 +726,55 @@ function respawnPlayer(p, { avoid = [] } = {}) {
 }
 
 function spawnInFrontOfPlayer(p, forwardX, forwardZ, { distMin = 8, distMax = 14, spread = 6 } = {}) {
-  const half = mapSize / 2;
+  const halfX = Number(p?.movementBounds?.halfX) > 0 ? p.movementBounds.halfX : mapSize / 2;
+  const halfZ = Number(p?.movementBounds?.halfZ) > 0 ? p.movementBounds.halfZ : mapSize / 2;
   const margin = p.head.size / 2;
   const dist = randomBetween(distMin, distMax);
   const perpX = -forwardZ;
   const perpZ = forwardX;
   const lateral = randomBetween(-spread, spread);
-  const x = clamp(p.head.mesh.position.x + forwardX * dist + perpX * lateral, -half + margin, half - margin);
-  const z = clamp(p.head.mesh.position.z + forwardZ * dist + perpZ * lateral, -half + margin, half - margin);
+  const x = clamp(p.head.mesh.position.x + forwardX * dist + perpX * lateral, -halfX + margin, halfX - margin);
+  const z = clamp(p.head.mesh.position.z + forwardZ * dist + perpZ * lateral, -halfZ + margin, halfZ - margin);
   p.setPosition(x, p.head.size / 2, z);
   p.setLookDirFromMove(-forwardX, -forwardZ);
 }
 
 const baseSpeedAt2 = 2.6;
-const player = new Player({ cubeFactory, parent: env.scene, mapSize, name: "You", speed: baseSpeedAt2, tailLength: 0, headLevel: 1 });
+function normalizeUserName(value) {
+  const raw = String(value ?? "");
+  const cleaned = raw.replace(/\s+/g, " ").replace(/[\r\n\t]/g, " ").trim();
+  const limited = cleaned.slice(0, 18);
+  return limited;
+}
+
+function loadUserName() {
+  try {
+    return normalizeUserName(localStorage.getItem("username"));
+  } catch {
+    return "";
+  }
+}
+
+function saveUserName(name) {
+  const next = normalizeUserName(name);
+  try {
+    localStorage.setItem("username", next);
+  } catch {
+  }
+  return next;
+}
+
+const initialUserName = loadUserName() || "Player";
+const player = new Player({
+  cubeFactory,
+  parent: env.scene,
+  mapSize,
+  movementBounds: currentMovementBounds,
+  name: initialUserName,
+  speed: baseSpeedAt2,
+  tailLength: 0,
+  headLevel: 1,
+});
 player.setPosition(0, player.head.size / 2, 1);
 if (player.head?.mesh) player.head.mesh.visible = false;
 const defaultCameraPos = env.camera.position.clone();
@@ -667,6 +785,9 @@ let spectatorFocus = null;
 let matchActive = false;
 let matchTotalPlayers = 0;
 let matchEndAtSec = 0;
+let matchPendingEndAtSec = 0;
+let matchPendingWinner = null;
+let matchPendingReasonText = "";
 const killFeed = [];
 
 getStats(player);
@@ -852,6 +973,7 @@ for (let i = 0; i < botCount; i += 1) {
     cubeFactory,
     parent: env.scene,
     mapSize,
+    movementBounds: currentMovementBounds,
     name: `PC ${String(i + 1).padStart(2, "0")}`,
     speed: baseSpeedAt2,
     tailLength,
@@ -993,11 +1115,11 @@ function isVisible(bot, brain, dx, dz, dist, category) {
 }
 
 function clampTargetToArena(bot, planType, x, z) {
-  const half = mapSize / 2;
+  const { halfX, halfZ } = halfBoundsFor(bot);
   const size = bot?.head?.size ?? 0;
   const edgeMargin = size * 0.3;
   if (planType === "hunt") {
-    return { x: clamp(x, -half + edgeMargin, half - edgeMargin), z: clamp(z, -half + edgeMargin, half - edgeMargin) };
+    return { x: clamp(x, -halfX + edgeMargin, halfX - edgeMargin), z: clamp(z, -halfZ + edgeMargin, halfZ - edgeMargin) };
   }
 
   const margin = size / 2 + 0.2;
@@ -1008,7 +1130,7 @@ function clampTargetToArena(bot, planType, x, z) {
         ? 0.35 + size * 0.25
         : 0.7 + size * 0.35;
   const m = margin + extra;
-  return { x: clamp(x, -half + m, half - m), z: clamp(z, -half + m, half - m) };
+  return { x: clamp(x, -halfX + m, halfX - m), z: clamp(z, -halfZ + m, halfZ - m) };
 }
 
 function computeThreat(bot, brain) {
@@ -1382,15 +1504,15 @@ function thinkMockLLM(bot, brain, nowSec) {
       const al = Math.sqrt(ax * ax + az * az) || 1;
       ax /= al;
       az /= al;
-      const half = mapSize / 2;
+      const { halfX, halfZ } = halfBoundsFor(bot);
       const margin = botSize / 2 + 0.8;
       const push = (3.8 + botSize * 11) * (0.9 + brain.personality.caution * 0.35);
       setPlan(brain, nowSec, {
         type: "escape",
         targetKind: "point",
         targetId: th.head.mesh.uuid,
-        x: clamp(pos.x + ax * push, -half + margin, half - margin),
-        z: clamp(pos.z + az * push, -half + margin, half - margin),
+        x: clamp(pos.x + ax * push, -halfX + margin, halfX - margin),
+        z: clamp(pos.z + az * push, -halfZ + margin, halfZ - margin),
         reason: "llm:escape",
       });
       brain.nextThinkAtSec = Math.max(brain.nextThinkAtSec, nowSec + minThink);
@@ -1447,7 +1569,7 @@ function thinkMockLLM(bot, brain, nowSec) {
     const fz = (botDir.z ?? 0) / fwdLen;
     const px = -fz;
     const pz = fx;
-    const half = mapSize / 2;
+    const { halfX, halfZ } = halfBoundsFor(bot);
     const margin = botSize / 2 + 0.8;
     const dist = randomBetween(6, 16);
     const side = randomSign() * randomBetween(0, 7.5);
@@ -1455,8 +1577,8 @@ function thinkMockLLM(bot, brain, nowSec) {
       type: "wander",
       targetKind: "point",
       targetId: null,
-      x: clamp(pos.x + fx * dist + px * side, -half + margin, half - margin),
-      z: clamp(pos.z + fz * dist + pz * side, -half + margin, half - margin),
+      x: clamp(pos.x + fx * dist + px * side, -halfX + margin, halfX - margin),
+      z: clamp(pos.z + fz * dist + pz * side, -halfZ + margin, halfZ - margin),
     };
     reason = "llm:wander";
   }
@@ -2442,13 +2564,55 @@ env.renderer.domElement.addEventListener("pointercancel", (e) => {
 });
 
 const startOverlay = document.getElementById("startOverlay");
-const startButton = document.getElementById("startButton");
 const startTitle = document.getElementById("startTitle");
 const startHint = document.getElementById("startHint");
+const nameRow = document.getElementById("nameRow");
+const nameInput = document.getElementById("nameInput");
+const arenaRow = document.getElementById("arenaRow");
+const arenaButtons = Array.from(arenaRow?.querySelectorAll?.("[data-arena]") ?? []);
 const endLeaderboardEl = document.getElementById("endLeaderboard");
 const aliveCounterEl = document.getElementById("aliveCounter");
 const killFeedEl = document.getElementById("killFeed");
 const hudMatchInfoEl = document.getElementById("hudMatchInfo");
+
+function getCurrentUserNameInput() {
+  return normalizeUserName(nameInput?.value ?? "");
+}
+
+function updateStartGateUI() {
+  const ok = Boolean(getCurrentUserNameInput());
+  for (const b of arenaButtons) b.disabled = !ok;
+  return ok;
+}
+
+function setArenaButtonsActive(arenaType) {
+  const current = normalizeArenaType(arenaType);
+  for (const b of arenaButtons) {
+    const t = normalizeArenaType(b?.dataset?.arena);
+    b.classList.toggle("arenaBtnActive", t === current);
+  }
+}
+
+if (nameInput) {
+  nameInput.value = loadUserName();
+  updateStartGateUI();
+  setArenaButtonsActive(currentArenaType);
+  nameInput.addEventListener("input", () => updateStartGateUI(), { passive: true });
+  nameInput.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.code === "Space") e.stopPropagation();
+      if (e.code === "Enter") e.stopPropagation();
+    },
+    { passive: false },
+  );
+}
+
+for (const b of arenaButtons) {
+  b.addEventListener("click", () => startGame(b?.dataset?.arena));
+}
+
+showStartOverlayDefault();
 
 renderAliveCounter();
 renderKillFeed();
@@ -2457,6 +2621,15 @@ env.addUpdatable({
   update() {
     renderAliveCounter();
     const nowSec = performance.now() * 0.001;
+    if (matchActive && matchPendingEndAtSec > 0 && nowSec >= matchPendingEndAtSec) {
+      const winner = matchPendingWinner ?? players?.[0] ?? null;
+      const reasonText = matchPendingReasonText || "آخر لاعب";
+      matchPendingEndAtSec = 0;
+      matchPendingWinner = null;
+      matchPendingReasonText = "";
+      if (winner) endMatch({ winner, reasonText });
+      return;
+    }
     if (matchActive && matchEndAtSec > 0 && nowSec >= matchEndAtSec) {
       endMatchByTime();
       return;
@@ -2491,17 +2664,34 @@ function showEndOverlay(winnerOrOptions) {
   if (startTitle) startTitle.textContent = "انتهت المباراة";
   if (startHint) {
     const winnerText = `الفائز: ${getPlayerName(winner)}`;
-    startHint.textContent = reasonText ? `${reasonText} — ${winnerText}` : winnerText;
+    startHint.textContent = reasonText ? `${reasonText} — ${winnerText} — اختار ملعب لإعادة` : `${winnerText} — اختار ملعب لإعادة`;
   }
-  if (startButton) startButton.textContent = "إعادة";
+  if (nameRow) nameRow.style.display = "flex";
+  updateStartGateUI();
+  setArenaButtonsActive(currentArenaType);
   renderEndLeaderboard(winner);
+  showStartOverlay();
+}
+
+function showDeathOverlay({ killer } = {}) {
+  if (startTitle) startTitle.textContent = "لقد خسرت";
+  if (startHint) {
+    const killerName = killer ? getPlayerName(killer) : "";
+    startHint.textContent = killerName ? `قتلك: ${killerName} — اختار ملعب لإعادة` : "تمت إزالتك — اختار ملعب لإعادة";
+  }
+  if (nameRow) nameRow.style.display = "flex";
+  updateStartGateUI();
+  setArenaButtonsActive(currentArenaType);
+  clearEndLeaderboard();
   showStartOverlay();
 }
 
 function showStartOverlayDefault() {
   if (startTitle) startTitle.textContent = "ابدأ المباراة";
-  if (startHint) startHint.textContent = "اضغط ابدأ أو اضغط Space";
-  if (startButton) startButton.textContent = "ابدأ";
+  if (startHint) startHint.textContent = "ادخل User name ثم اختار الملعب";
+  if (nameRow) nameRow.style.display = "flex";
+  updateStartGateUI();
+  setArenaButtonsActive(currentArenaType);
   clearEndLeaderboard();
 }
 
@@ -2542,7 +2732,18 @@ function leaveArena(focus) {
   showStartOverlay();
 }
 
-function startGame() {
+function startGame(nextArenaType) {
+  const inputName = getCurrentUserNameInput();
+  if (!inputName) {
+    if (startHint) startHint.textContent = "لازم تدخل User name الأول";
+    if (nameInput?.focus) nameInput.focus();
+    updateStartGateUI();
+    return;
+  }
+  const nextName = saveUserName(inputName);
+  player.setName(nextName);
+  applyArenaType(nextArenaType ?? currentArenaType);
+  setArenaButtonsActive(currentArenaType);
   setPaused(false);
   showStartOverlayDefault();
   hideStartOverlay();
@@ -2551,17 +2752,9 @@ function startGame() {
 }
 
 if (!TEST_MODE) {
-  if (startButton) startButton.addEventListener("click", startGame);
-  if (startOverlay) startOverlay.addEventListener("pointerdown", (e) => {
-    if (e.target === startOverlay) startGame();
-  });
-  addEventListener("keydown", (e) => {
-    if (e.code === "Space" || e.code === "Enter") startGame();
-  });
 } else {
   hideStartOverlay();
   if (startOverlay) startOverlay.style.display = "none";
-  if (startButton) startButton.style.display = "none";
   matchActive = true;
   addEventListener("keydown", (e) => {
     if (e.code === "Digit1") {

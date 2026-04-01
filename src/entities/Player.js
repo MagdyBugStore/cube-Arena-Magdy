@@ -43,6 +43,7 @@ export class Player {
     cubeFactory,
     parent,
     mapSize = 18,
+    movementBounds,
     name = "You",
     speed = 2.6,
     speedDecayPerLevel = 1.02, // speed per level decay
@@ -60,6 +61,7 @@ export class Player {
     this.cubeFactory = cubeFactory;
     this.parent = parent;
     this.mapSize = mapSize;
+    this.movementBounds = null;
     this.speed = speed;
     this.speedDecayPerLevel = speedDecayPerLevel;
     this.minSpeed = minSpeed;
@@ -97,6 +99,22 @@ export class Player {
     this._headPulseDurationSec = headPulseDurationSec;
     this._headPulseMaxScale = headPulseMaxScale;
     this._headPulseTime = 0;
+
+    this.setMovementBounds(movementBounds);
+  }
+
+  setMovementBounds(bounds) {
+    if (!bounds) {
+      this.movementBounds = null;
+      return;
+    }
+    const halfX = Number(bounds.halfX);
+    const halfZ = Number(bounds.halfZ);
+    if (!Number.isFinite(halfX) || !Number.isFinite(halfZ) || halfX <= 0 || halfZ <= 0) {
+      this.movementBounds = null;
+      return;
+    }
+    this.movementBounds = { halfX, halfZ };
   }
 
   setName(name) {
@@ -478,10 +496,12 @@ export class Player {
     this.knockbackVel.x *= damp;
     this.knockbackVel.z *= damp;
 
-    const half = this.mapSize / 2;
+    const bounds = this.movementBounds;
+    const halfX = bounds ? bounds.halfX : this.mapSize / 2;
+    const halfZ = bounds ? bounds.halfZ : this.mapSize / 2;
     const margin = this.head.size * 0.3;
-    this.head.mesh.position.x = clamp(this.head.mesh.position.x, -half + margin, half - margin);
-    this.head.mesh.position.z = clamp(this.head.mesh.position.z, -half + margin, half - margin);
+    this.head.mesh.position.x = clamp(this.head.mesh.position.x, -halfX + margin, halfX - margin);
+    this.head.mesh.position.z = clamp(this.head.mesh.position.z, -halfZ + margin, halfZ - margin);
     this.head.mesh.position.y = this.head.size / 2;
 
     const headPos = this.head.mesh.position;
