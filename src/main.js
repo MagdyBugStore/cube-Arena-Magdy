@@ -20,6 +20,9 @@ const BOT_KILL_ALL = URL_PARAMS.has("killall")
     : BOT_OBJECTIVE === "killall" || BOT_OBJECTIVE === "kill";
 const LLM_MODE = String(URL_PARAMS.get("llm") ?? "").trim().toLowerCase();
 const LLM_BOT_INDEX = Math.max(0, Number(URL_PARAMS.get("llmbot") ?? 0) || 0);
+const MINIMAP_ENABLED = URL_PARAMS.has("minimap")
+  ? URL_PARAMS.get("minimap") === "1" || URL_PARAMS.get("minimap") === "true"
+  : true;
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -656,6 +659,121 @@ if (hudBoard) {
     hudBoard.append(row);
     hudRows.push({ rank, name, score });
   }
+}
+
+function createMiniMap() {
+  if (!MINIMAP_ENABLED) return null;
+  const hudEl = document.getElementById("hud");
+  if (!hudEl) return null;
+
+  const wrap = document.createElement("div");
+  wrap.style.marginTop = "10px";
+  wrap.style.display = "flex";
+  wrap.style.flexDirection = "column";
+  wrap.style.gap = "6px";
+
+  const title = document.createElement("div");
+  title.textContent = "الخريطة";
+  title.style.fontWeight = "900";
+  title.style.opacity = "0.9";
+
+  const canvas = document.createElement("canvas");
+  const size = 180;
+  canvas.width = size;
+  canvas.height = size;
+  canvas.style.width = `${size}px`;
+  canvas.style.height = `${size}px`;
+  canvas.style.borderRadius = "12px";
+  canvas.style.background = "rgba(0, 0, 0, 0.18)";
+  canvas.style.border = "1px solid rgba(255, 255, 255, 0.12)";
+
+  wrap.append(title, canvas);
+  hudEl.append(wrap);
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.imageSmoothingEnabled = true;
+
+  return { canvas, ctx, size, pad: 10, nextDrawAtSec: 0 };
+}
+
+function drawMiniMap(m, nowSec) {
+  if (!m) return;
+  if (nowSec < (m.nextDrawAtSec ?? 0)) return;
+  m.nextDrawAtSec = nowSec + 1 / 15;
+
+  const ctx = m.ctx;
+  const size = m.size;
+  const pad = m.pad;
+  const half = mapSize / 2;
+  const span = Math.max(1e-6, mapSize);
+  const usable = size - pad * 2;
+  const toMini = (x, z) => {
+    const u = clamp01((x + half) / span);
+    const v = clamp01((z + half) / span);
+    return { x: pad + u * usable, y: pad + (1 - v) * usable };
+  };
+
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "rgba(6, 12, 22, 0.65)";
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad - 0.5, pad - 0.5, usable + 1, usable + 1);
+
+  const cubes = freeCubeSpawner?.cubes;
+  if (Array.isArray(cubes) && cubes.length > 0) {
+    const samples = Math.min(120, cubes.length);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+    for (let i = 0; i < samples; i += 1) {
+      const entry = cubes[(Math.random() * cubes.length) | 0];
+      const c = entry?.cube;
+      const p = c?.mesh?.position;
+      if (!p) continue;
+      const mp = toMini(p.x, p.z);
+      ctx.fillRect(mp.x, mp.y, 2, 2);
+    }
+  }
+
+  const list = Array.isArray(players) ? players : [];
+  for (const p of list) {
+    if (!p?.head?.mesh) continue;
+    if (p.eliminated) continue;
+    const pos = p.head.mesh.position;
+    const mp = toMini(pos.x, pos.z);
+    const v = Math.max(1, p.head.value ?? 1);
+    const r = clamp(2 + Math.log2(v) * 0.35, 2, 7.5);
+    const isYou = p === player && playerJoined;
+    ctx.fillStyle = isYou ? "rgba(120, 190, 255, 0.95)" : "rgba(255, 120, 120, 0.85)";
+    ctx.beginPath();
+    ctx.arc(mp.x, mp.y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    const dir = p.headDirection;
+    if (dir) {
+      const dl = Math.sqrt((dir.x ?? 0) * (dir.x ?? 0) + (dir.z ?? 0) * (dir.z ?? 0)) || 1;
+      const dx = (dir.x ?? 0) / dl;
+      const dz = (dir.z ?? 0) / dl;
+      const tip = toMini(pos.x + dx * 1.25, pos.z + dz * 1.25);
+      ctx.strokeStyle = isYou ? "rgba(120, 190, 255, 0.8)" : "rgba(255, 120, 120, 0.65)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(mp.x, mp.y);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.stroke();
+    }
+  }
+}
+
+const miniMap = createMiniMap();
+if (miniMap) {
+  env.addUpdatable({
+    update(dt, t) {
+      const nowSec = (Number.isFinite(t) ? t : performance.now()) * 0.001;
+      drawMiniMap(miniMap, nowSec);
+    },
+  });
 }
 
 const bots = [];
