@@ -1,0 +1,11 @@
+{
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@geckos.io/client": "^3.0.2",
+    "@geckos.io/server": "^3.0.2",
+    "protobufjs": "^7.5.4"
+  }
+}
