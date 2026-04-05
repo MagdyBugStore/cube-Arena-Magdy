@@ -14,6 +14,7 @@ import { createTailSystem } from "./gameplay/tailSystem.js";
 import { createMatchSystem } from "./gameplay/matchSystem.js";
 import { createSessionSystem } from "./gameplay/sessionSystem.js";
 import { createNetSystem } from "./net/netSystem.js";
+import { createVoiceChatSystem } from "./net/voiceChatSystem.js";
 import { createLobbyUi } from "./ui/lobbyUi.js";
 import { createBotsSystem } from "./ai/botsSystem.js";
 import { createHudSystem } from "./ui/hudSystem.js";
@@ -271,6 +272,9 @@ getStats(player);
 // HUD + Players Collections
 // =========================
 const hudBoard = document.getElementById("hudBoard");
+const voiceToggleBtn = document.getElementById("voiceToggleBtn");
+const voiceMuteBtn = document.getElementById("voiceMuteBtn");
+const voiceStatusEl = document.getElementById("voiceStatus");
 let hudSystem = null;
 
 const bots = [];
@@ -317,6 +321,63 @@ const netCreateRoom = net.netCreateRoom;
 const netJoinExistingRoom = net.netJoinExistingRoom;
 const netStartRoom = net.netStartRoom;
 const netLeaveRoom = net.netLeaveRoom;
+
+const voiceChat = createVoiceChatSystem({
+  multiplayerEnabled: MULTIPLAYER_ENABLED,
+  netState,
+  ensureChannel: net.ensureChannel,
+});
+env.addUpdatable({ update: () => voiceChat.update() });
+
+function renderVoiceHud() {
+  if (!voiceToggleBtn) return;
+  const s = voiceChat.getState();
+  voiceToggleBtn.disabled = !MULTIPLAYER_ENABLED || !s.supported;
+  voiceToggleBtn.textContent = s.enabled ? "إيقاف الشات الصوتي" : "تفعيل الشات الصوتي";
+  if (voiceMuteBtn) {
+    voiceMuteBtn.style.display = s.enabled ? "" : "none";
+    voiceMuteBtn.textContent = s.micMuted ? "تشغيل المايك" : "كتم المايك";
+  }
+  if (voiceStatusEl) {
+    const peersText = s.enabled ? ` — متصلين صوت: ${s.peers}` : "";
+    voiceStatusEl.textContent = s.status ? `${s.status}${peersText}` : s.enabled ? `الصوت شغال${peersText}` : "";
+  }
+}
+
+if (voiceToggleBtn) {
+  voiceToggleBtn.addEventListener(
+    "click",
+    async () => {
+      const s = voiceChat.getState();
+      if (s.enabled) voiceChat.disable();
+      else await voiceChat.enable();
+      renderVoiceHud();
+    },
+    { passive: false },
+  );
+}
+
+if (voiceMuteBtn) {
+  voiceMuteBtn.addEventListener(
+    "click",
+    () => {
+      const s = voiceChat.getState();
+      voiceChat.setMicMuted(!s.micMuted);
+      renderVoiceHud();
+    },
+    { passive: true },
+  );
+}
+
+let lastVoiceHudAtMs = 0;
+env.addUpdatable({
+  update: () => {
+    const nowMs = performance.now();
+    if (nowMs - (lastVoiceHudAtMs || 0) < 250) return;
+    lastVoiceHudAtMs = nowMs;
+    renderVoiceHud();
+  },
+});
 
 // HUD بيعرض info سواء Multiplayer أو Singleplayer
 hudSystem = createHudSystem({

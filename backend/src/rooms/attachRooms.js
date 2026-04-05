@@ -24,6 +24,9 @@ export function attachRooms(io, netConfig) {
     "room:empty",
     "room:error",
     "rooms:case",
+    "voice:ready",
+    "voice:signal",
+    "voice:hangup",
   ]);
 
   const netLog = createNetLog({
@@ -587,6 +590,66 @@ export function attachRooms(io, netConfig) {
       match.cubes.delete(cubeId);
       io.room(roomId).emit("cube:collected", { cubeId, by: player.num, value: cube.value });
       io.room(roomId).emit("tail:enqueue", { playerNum: player.num, value: cube.value });
+    });
+
+    channel.on("voice:ready", (payload) => {
+      const roomId = getChannelRoomId(channel);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room || !room.players.has(channel.id)) return;
+      netLog("voice:ready", { id: channel.id, roomId });
+      touchChannel(channel.id, {});
+      io.room(roomId).emit("voice:ready", {
+        roomId,
+        fromId: channel.id,
+        enabled: payload?.enabled !== false,
+      });
+    });
+
+    channel.on("voice:hangup", () => {
+      const roomId = getChannelRoomId(channel);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room || !room.players.has(channel.id)) return;
+      netLog("voice:hangup", { id: channel.id, roomId });
+      touchChannel(channel.id, {});
+      io.room(roomId).emit("voice:hangup", { roomId, fromId: channel.id });
+    });
+
+    channel.on("voice:signal", (payload) => {
+      const roomId = getChannelRoomId(channel);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room || !room.players.has(channel.id)) return;
+
+      const kind = String(payload?.kind ?? "");
+      const toId = String(payload?.toId ?? "");
+      if (!toId) return;
+      if (kind !== "offer" && kind !== "answer" && kind !== "ice") return;
+
+      let data = payload?.data ?? null;
+      if (kind === "ice") {
+        const candidate = typeof data?.candidate === "string" ? data.candidate.slice(0, 4096) : "";
+        const sdpMid = typeof data?.sdpMid === "string" ? data.sdpMid.slice(0, 128) : null;
+        const sdpMLineIndex = Number.isFinite(Number(data?.sdpMLineIndex))
+          ? Number(data.sdpMLineIndex)
+          : null;
+        data = { candidate, sdpMid, sdpMLineIndex };
+      } else {
+        const sdp = typeof data?.sdp === "string" ? data.sdp.slice(0, 140000) : "";
+        const type = kind;
+        data = { type, sdp };
+      }
+
+      netLog("voice:signal", { id: channel.id, roomId, kind });
+      touchChannel(channel.id, {});
+      io.room(roomId).emit("voice:signal", {
+        roomId,
+        fromId: channel.id,
+        toId,
+        kind,
+        data,
+      });
     });
 
     function handlePlayerUpdate(raw) {

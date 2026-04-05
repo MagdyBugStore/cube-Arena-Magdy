@@ -649,6 +649,23 @@
     <div id="minimapHud" dir="rtl"></div>
     <div id="hud" dir="rtl">
       <div class="title">اللاعبين</div>
+      <div id="voiceHud" style="display:flex;flex-direction:column;gap:8px;margin:10px 0 12px;">
+        <button
+          id="voiceToggleBtn"
+          type="button"
+          style="cursor:pointer;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.92);font-weight:900;"
+        >
+          تفعيل الشات الصوتي
+        </button>
+        <button
+          id="voiceMuteBtn"
+          type="button"
+          style="display:none;cursor:pointer;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.92);font-weight:900;"
+        >
+          كتم المايك
+        </button>
+        <div id="voiceStatus" style="opacity:0.85;font-weight:800;font-size:12px;"></div>
+      </div>
       <div class="board" id="hudBoard"></div>
     </div>
     <script type="importmap">
