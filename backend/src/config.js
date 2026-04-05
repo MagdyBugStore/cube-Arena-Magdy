@@ -29,10 +29,10 @@ const PUBLIC_DIR = path.resolve(BACKEND_DIR, "..", "game");
 const NODE_MODULES_DIR = path.resolve(BACKEND_DIR, "node_modules");
 
 const NET_LOG_ENABLED = envBool("NET_LOG", false);
-const NET_LOG_IMPORTANT_ENABLED = envBool("NET_LOG_IMPORTANT", true);
+const NET_LOG_IMPORTANT_ENABLED = envBool("NET_LOG_IMPORTANT", false);
 const NET_LOG_SNAPSHOT_ENABLED = NET_LOG_ENABLED && envBool("NET_LOG_SNAPSHOT", true);
 const NET_LOG_INTERVAL_MS = Math.max(1000, envNumber("NET_LOG_INTERVAL_MS", 5000));
-const NET_ROOMS_CASE_ENABLED = envBool("NET_ROOMS_CASE", true);
+const NET_ROOMS_CASE_ENABLED = envBool("NET_ROOMS_CASE", false);
 const NET_ROOMS_CASE_INTERVAL_MS = Math.max(1000, envNumber("NET_ROOMS_CASE_INTERVAL_MS", 3000));
 
 export const config = {
@@ -54,4 +54,3 @@ export const config = {
     roomsCaseIntervalMs: NET_ROOMS_CASE_INTERVAL_MS,
   },
 };
-

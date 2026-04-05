@@ -43,6 +43,11 @@ export function createNetSystem({
     lobby: null,
   };
 
+  const desired = {
+    roomId: null,
+    name: null,
+  };
+
   const traffic = {
     tx: 0,
     rx: 0,
@@ -53,6 +58,7 @@ export function createNetSystem({
   const debugPlayerUpdate = {
     lastTxLogAtMs: 0,
     lastRxLogAtMsByPid: new Map(),
+    lastRxSeqByPid: new Map(),
   };
 
   const debugClient = {
@@ -62,7 +68,7 @@ export function createNetSystem({
   };
 
   function maybeEmitUpdateSample({ channel, nowMs, reason, hasProto } = {}) {
-    
+    if (!netLogEnabled) return;
     if (!channel) return;
     const elapsedSample = nowMs - (debugClient.lastSampleSentAtMs || 0);
     if (elapsedSample < 3000) return;
@@ -85,11 +91,10 @@ export function createNetSystem({
     if (debugClient.lastTx) Object.assign(payload, debugClient.lastTx);
 
     try {
-      console.log("client:update-sample", payload);
       channel.emit("client:update-sample", payload);
     } catch {
     }
-    netLog("client:update-sample", payload);
+    //netLog("client:update-sample", payload);
   }
 
   const handlers = {
@@ -134,77 +139,13 @@ export function createNetSystem({
     replayLastPayloads();
   }
 
-  function netLog(event, data) {
-    if (!netLogEnabled) return;
-    const t = (performance.now() / 1000).toFixed(3);
-    const labelName = (() => {
-      try {
-        return getPlayerName(player);
-      } catch {
-        return "Player";
-      }
-    })();
-    const labelId = String(netState.playerId ?? netState.channel?.id ?? "");
-    const label = labelId ? `${labelName}@${labelId}` : labelName;
-    const state = {
-      pid: netState.playerId,
-      pnum: netState.playerNum,
-      room: netState.roomId,
-      joined: netState.joined,
-      connected: netState.connected,
-      remotes: netState.remotes.size,
-      playing: Boolean(getPlayerJoined?.()),
-    };
-    if (data === undefined) console.log(`[net ${t}] ${label} ${event}`, state);
-    else console.log(`[net ${t}] ${label} ${event}`, state, data);
-  }
+  function netLog() {}
 
   function reportHandlerError(handlerName, error) {
     console.error(`[net] handler error (${handlerName})`, error);
     const message =
       error instanceof Error ? error.message : String(error ?? "");
     netLog(`handler:error:${handlerName}`, { message });
-  }
-
-  if (netCaseEnabled) {
-    setInterval(
-      () => {
-        const nowMs = performance.now();
-        const lobby = netState.lobby;
-        const lobbyPlayers = Array.isArray(lobby?.players) ? lobby.players : [];
-        const remotes = Array.from(netState.remotes.entries()).map(
-          ([id, entry]) => ({
-            id,
-            name: getPlayerName(entry?.player),
-            lastSeenSec: entry?.lastSeenAtMs
-              ? Number(((nowMs - entry.lastSeenAtMs) / 1000).toFixed(2))
-              : null,
-          }),
-        );
-        netLog("case", {
-          urlRoom: String(
-            urlParams?.get?.("room") ?? urlParams?.get?.("roomId") ?? "",
-          ),
-          roomsCount: Array.isArray(netState.rooms) ? netState.rooms.length : 0,
-          lobby: lobby
-            ? {
-                roomId: lobby.roomId,
-                status: lobby.status,
-                hostId: lobby.hostId,
-                arenaType: lobby.arenaType,
-                maxPlayers: lobby.maxPlayers,
-                playerCount: lobbyPlayers.length,
-                players: lobbyPlayers.map((p) => ({
-                  id: p?.id,
-                  name: p?.name,
-                })),
-              }
-            : null,
-          remotes,
-        });
-      },
-      Math.max(250, Number(netCaseIntervalMs) || 3000),
-    );
   }
 
   function sanitizeRoomIdClient(value) {
@@ -307,6 +248,18 @@ message PlayerUpdate {
     if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
     if (ArrayBuffer.isView(raw))
       return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+    if (raw && typeof raw === "object" && raw.type === "Buffer" && Array.isArray(raw.data))
+      return Uint8Array.from(raw.data);
+    if (Array.isArray(raw)) return Uint8Array.from(raw);
+    if (raw && typeof raw === "object") {
+      const keys = Object.keys(raw);
+      if (keys.length > 0 && keys.every((k) => String(Number(k)) === k)) {
+        const max = keys.reduce((m, k) => Math.max(m, Number(k) || 0), 0);
+        const out = new Uint8Array(max + 1);
+        for (const k of keys) out[Number(k)] = Number(raw[k]) & 255;
+        return out;
+      }
+    }
     return null;
   }
 
@@ -358,12 +311,27 @@ message PlayerUpdate {
 
     channel.onDisconnect(() => {
       netLog("channel:disconnect");
+      const rejoinRoomId = desired.roomId ?? netState.roomId;
+      const shouldAutoRejoin = Boolean(rejoinRoomId) && Boolean(getPlayerJoined?.());
+      const rejoinName =
+        desired.name ??
+        (() => {
+          try {
+            return getPlayerName(player);
+          } catch {
+            return "Player";
+          }
+        })();
       netState.joined = false;
       netState.playerId = null;
       netState.playerNum = null;
-      netState.roomId = null;
       netState.connected = false;
-      netState.pending = null;
+      netState.pending = shouldAutoRejoin
+        ? {
+            type: "room:join",
+            payload: { roomId: rejoinRoomId, name: rejoinName },
+          }
+        : null;
       netState.rooms = [];
       netState.lobby = null;
       netState.remotesByNum.clear();
@@ -374,6 +342,8 @@ message PlayerUpdate {
       if (typeof clearNetCubes === "function") clearNetCubes();
       for (const id of Array.from(netState.remotes.keys()))
         removeRemotePlayer(id, "disconnect");
+      netState.roomId = rejoinRoomId ?? null;
+      netState.channel = null;
     });
 
     channel.on("welcome", (payload) => {
@@ -488,10 +458,6 @@ message PlayerUpdate {
       }
     });
 
-    channel.on("client:update-sample", (payload) => {
-      netLog("client:update-sample:rx", payload);
-    });
-
     channel.on("player:joined", (payload) => {
       const id = String(payload?.player?.id ?? "");
       if (!id) return;
@@ -501,7 +467,15 @@ message PlayerUpdate {
       if (netState.remotes.has(id)) return;
       const num = Number(payload?.player?.num) || 0;
       netLog("player:joined", { id, num, name: payload?.player?.name });
-      ensureRemotePlayer({ id, num, name: payload?.player?.name });
+      const entry = ensureRemotePlayer({ id, num, name: payload?.player?.name });
+      if (entry?.player && getMatchActive?.()) {
+        const p = entry.player;
+        if (typeof p.clearTail === "function") p.clearTail();
+        p.setHeadValue(2);
+        p.eliminated = false;
+        if (!players.includes(p)) players.push(p);
+        env.addUpdatable(p);
+      }
     });
 
     channel.on("player:left", (payload) => {
@@ -511,7 +485,7 @@ message PlayerUpdate {
       removeRemotePlayer(id, "player:left");
     });
 
-    channel.on("player:update", (raw) => {
+    function handleIncomingPlayerUpdate(raw) {
       const proto = getNetProto();
       const bytes = toU8(raw);
       if (!proto || !bytes) {
@@ -533,22 +507,13 @@ message PlayerUpdate {
       const pid = Number(decoded?.pid) || 0;
       if (!pid) return;
       if (netState.playerNum && pid === netState.playerNum) return;
+      const seq = Number(decoded?.seq) || 0;
+      const lastSeq = debugPlayerUpdate.lastRxSeqByPid.get(pid);
+      if (lastSeq === seq) return;
+      debugPlayerUpdate.lastRxSeqByPid.set(pid, seq);
 
       const nowMs = performance.now();
-      const lastAt = debugPlayerUpdate.lastRxLogAtMsByPid.get(pid) || 0;
-      if (nowMs - lastAt >= 1000) {
-        debugPlayerUpdate.lastRxLogAtMsByPid.set(pid, nowMs);
-        console.log("rx player:update", {
-          pid,
-          seq: Number(decoded?.seq) || 0,
-          x: Number(decoded?.x),
-          z: Number(decoded?.z),
-          dx: Number(decoded?.dx),
-          dz: Number(decoded?.dz),
-          hv: Number(decoded?.hv),
-          bytes: bytes.byteLength,
-        });
-      }
+      debugPlayerUpdate.lastRxLogAtMsByPid.set(pid, nowMs);
 
       const entry = netState.remotesByNum.get(pid);
       if (!entry) return;
@@ -566,7 +531,11 @@ message PlayerUpdate {
         entry.dir = { x: dx, z: dz };
       const hv = Number(decoded?.hv);
       if (Number.isFinite(hv) && hv > 0) entry.player.setHeadValue(hv);
-    });
+    }
+
+    channel.on("player:update", handleIncomingPlayerUpdate);
+    if (typeof channel?.onRaw === "function")
+      channel.onRaw((raw) => handleIncomingPlayerUpdate(raw));
 
     channel.on("cube:spawn", (payload) => {
       if (!multiplayerEnabled) return;
@@ -622,6 +591,8 @@ message PlayerUpdate {
           .toLowerCase() || "default",
       maxPlayers: Math.max(2, Math.min(20, Number(maxPlayers) || 8)),
     };
+    desired.roomId = payload.roomId;
+    desired.name = payload.name;
     netLog("room:create", payload);
     if (netState.connected) {
       channel.emit("room:create", payload);
@@ -641,6 +612,8 @@ message PlayerUpdate {
       roomId: sanitizeRoomIdClient(roomId),
       name: getPlayerName(player),
     };
+    desired.roomId = payload.roomId;
+    desired.name = payload.name;
     netLog("room:join", payload);
     if (netState.connected) {
       channel.emit("room:join", payload);
@@ -666,6 +639,7 @@ message PlayerUpdate {
     netLog("room:leave", { roomId: netState.roomId });
     if (channel && netState.joined)
       channel.emit("room:leave", { roomId: netState.roomId });
+    desired.roomId = null;
     netState.joined = false;
     netState.roomId = null;
     netState.lobby = null;
@@ -679,6 +653,7 @@ message PlayerUpdate {
   function update(dt) {
     if (!multiplayerEnabled) return;
     const nowMs = performance.now();
+    if (!netState.channel && (netState.pending || desired.roomId)) ensureChannel();
     const channel = netState.channel;
     if (!channel || !netState.joined || !netState.roomId) {
       if (nowMs - (traffic.lastSkipLogAtMs || 0) > 2500) {
@@ -775,27 +750,14 @@ message PlayerUpdate {
         bytes.byteOffset,
         bytes.byteOffset + bytes.byteLength,
       );
-      const usingRaw = typeof channel?.raw?.emit === "function";
-      if (usingRaw) channel.raw.emit("player:update", ab);
+      const hasRaw = typeof channel?.raw?.emit === "function";
+      if (hasRaw) channel.raw.emit(ab);
       else channel.emit("player:update", ab);
       traffic.tx += 1;
       debugClient.lastTx = message;
       debugClient.lastTxBytes = ab.byteLength;
 
-      if (nowMs - (debugPlayerUpdate.lastTxLogAtMs || 0) >= 1000) {
-        debugPlayerUpdate.lastTxLogAtMs = nowMs;
-        console.log("tx player:update", {
-          pid: message.pid,
-          seq: message.seq,
-          x: message.x,
-          z: message.z,
-          dx: message.dx,
-          dz: message.dz,
-          hv: message.hv,
-          bytes: ab.byteLength,
-          usingRaw,
-        });
-      }
+      debugPlayerUpdate.lastTxLogAtMs = nowMs;
     }
 
     maybeEmitUpdateSample({ channel, nowMs, reason: "ok", hasProto: proto });

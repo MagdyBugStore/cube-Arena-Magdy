@@ -16,6 +16,8 @@ export function attachRooms(io, netConfig) {
     "room:started:ack",
     "client:started",
     "client:update-sample",
+    "player:update:rx",
+    "player:update:drop",
     "room:leave:request",
     "room:leave",
     "room:host-change",
@@ -370,7 +372,6 @@ export function attachRooms(io, netConfig) {
       if (!roomId) return sendRoomError(channel, "Invalid room id");
       const room = rooms.get(roomId);
       if (!room) return sendRoomError(channel, "Room not found");
-      if (room.status !== "waiting") return sendRoomError(channel, "Room already started");
       if (room.players.size >= room.maxPlayers) return sendRoomError(channel, "Room is full");
       netLog("room:join", { id: channel.id, roomId, name });
       touchChannel(channel.id, { name });
@@ -392,6 +393,25 @@ export function attachRooms(io, netConfig) {
       emitRoomState(roomId);
       channel.emit("room:state", roomSnapshot(room));
       broadcastRoomsList();
+
+      if (room.status === "started") {
+        const match = matches.get(roomId);
+        if (!match) return;
+        const pos = pickSpawnXZ(match.rng, match.bounds, match.usedSpawns, { margin: 1.8, avoidDist: 10 });
+        const angle = match.rng() * Math.PI * 2;
+        const dx = Math.cos(angle);
+        const dz = Math.sin(angle);
+        match.spawns.push({ num: player.num, x: pos.x, z: pos.z, dx, dz });
+        channel.emit("room:started", {
+          roomId,
+          arenaType: room.arenaType,
+          seed: match.seed,
+          mapSize: MAP_SIZE,
+          players: Array.from(room.players.values()).map((p) => ({ id: p.id, num: p.num, name: p.name })),
+          spawns: match.spawns,
+          cubes: Array.from(match.cubes.values()),
+        });
+      }
     });
 
     channel.on("room:leave", () => {
@@ -420,12 +440,12 @@ export function attachRooms(io, netConfig) {
       const seed = (Math.random() * 4294967296) >>> 0;
       const rng = createRng(seed);
       const bounds = movementBoundsForArena(room.arenaType, MAP_SIZE);
-      const usedSpawns = [];
       const players = Array.from(room.players.values()).map((p) => ({
         id: p.id,
         num: p.num,
         name: p.name,
       }));
+      const usedSpawns = [];
       const spawns = players.map((p) => {
         const pos = pickSpawnXZ(rng, bounds, usedSpawns, { margin: 1.8, avoidDist: 10 });
         const angle = rng() * Math.PI * 2;
@@ -455,6 +475,9 @@ export function attachRooms(io, netConfig) {
         maxCubes,
         nextCubeId,
         cubes,
+        spawns,
+        usedSpawns,
+        usedCubePos,
         spawnTimer: null,
       };
 
@@ -463,7 +486,7 @@ export function attachRooms(io, netConfig) {
         if (!r || r.status !== "started") return;
         if (match.cubes.size >= match.maxCubes) return;
         const value = DEFAULT_CUBE_VALUES[(match.rng() * DEFAULT_CUBE_VALUES.length) | 0] ?? 1;
-        const pos = pickSpawnXZ(match.rng, match.bounds, usedCubePos, { margin: 1.6, avoidDist: 2.4 });
+        const pos = pickSpawnXZ(match.rng, match.bounds, match.usedCubePos, { margin: 1.6, avoidDist: 2.4 });
         const cube = { id: match.nextCubeId++, value, x: pos.x, z: pos.z };
         match.cubes.set(cube.id, cube);
         io.room(roomId).emit("cube:spawn", cube);
@@ -566,7 +589,7 @@ export function attachRooms(io, netConfig) {
       io.room(roomId).emit("tail:enqueue", { playerNum: player.num, value: cube.value });
     });
 
-    channel.on("player:update", (raw) => {
+    function handlePlayerUpdate(raw) {
       const roomId = getChannelRoomId(channel);
       if (!roomId) return;
       const room = rooms.get(roomId);
@@ -602,8 +625,14 @@ export function attachRooms(io, netConfig) {
         netLog("player:update:rx", { id: channel.id, roomId, bytes });
       }
 
+      if (io?.raw?.room && typeof io.raw.room === "function") {
+        io.raw.room(roomId).emit(ab);
+      }
       io.room(roomId).emit("player:update", ab);
-    });
+    }
+
+    channel.on("player:update", handlePlayerUpdate);
+    if (typeof channel?.onRaw === "function") channel.onRaw(handlePlayerUpdate);
 
     channel.onDisconnect(() => {
       netLog("disconnect", { id: channel.id, roomId: getChannelRoomId(channel) });
