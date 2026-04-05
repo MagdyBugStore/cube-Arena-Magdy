@@ -1,25 +1,121 @@
 <!doctype html>
-<html lang="ar">
+<html class="dark" lang="ar">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Three.js Toon Cube</title>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>CUBE ARENA - Multiplayer Hub</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;900&amp;family=Manrope:wght@300;400;500;600;700;800&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              secondary: "#32ff00",
+              "on-secondary-container": "#e7ffd9",
+              "inverse-primary": "#006a6e",
+              error: "#ff716c",
+              "on-surface": "#f9f5fd",
+              "on-tertiary-fixed": "#2c003f",
+              "on-tertiary-container": "#000000",
+              "surface-tint": "#a1faff",
+              "secondary-dim": "#2eef00",
+              "surface-container-low": "#131319",
+              "inverse-surface": "#fcf8ff",
+              "tertiary-dim": "#bb00fc",
+              "secondary-container": "#116e00",
+              "surface-container-highest": "#25252d",
+              "error-container": "#9f0519",
+              "error-dim": "#d7383b",
+              "on-primary": "#006165",
+              "on-primary-container": "#00575b",
+              "secondary-fixed-dim": "#2eef00",
+              "on-error-container": "#ffa8a3",
+              primary: "#a1faff",
+              "tertiary-fixed": "#e192ff",
+              "on-error": "#490006",
+              background: "#0e0e13",
+              "primary-container": "#00f4fe",
+              "outline-variant": "#48474d",
+              "surface-container-lowest": "#000000",
+              "on-tertiary": "#390050",
+              "surface-container-high": "#1f1f26",
+              "primary-dim": "#00e5ee",
+              "on-background": "#f9f5fd",
+              "tertiary-fixed-dim": "#d97dff",
+              surface: "#0e0e13",
+              "tertiary-container": "#be0dff",
+              "on-tertiary-fixed-variant": "#600083",
+              "on-primary-fixed-variant": "#006266",
+              "on-secondary": "#0c5c00",
+              "on-primary-fixed": "#004346",
+              outline: "#76747b",
+              tertiary: "#d674ff",
+              "primary-fixed": "#00f4fe",
+              "on-secondary-fixed": "#074600",
+              "surface-bright": "#2c2b33",
+              "primary-fixed-dim": "#00e5ee",
+              "surface-dim": "#0e0e13",
+              "on-surface-variant": "#acaab1",
+              "secondary-fixed": "#32ff00",
+              "on-secondary-fixed-variant": "#0f6700",
+              "surface-variant": "#25252d",
+              "inverse-on-surface": "#55545b",
+              "surface-container": "#19191f",
+            },
+            borderRadius: {
+              DEFAULT: "0.125rem",
+              lg: "0.25rem",
+              xl: "0.5rem",
+              full: "0.75rem",
+            },
+            fontFamily: {
+              headline: ["Space Grotesk"],
+              body: ["Manrope"],
+              label: ["Space Grotesk"],
+            },
+          },
+        },
+      };
+    </script>
     <style>
       html,
       body {
         height: 100%;
         margin: 0;
-        background: #122e4b;
+        background: #0e0e13;
         overflow: hidden;
       }
       canvas {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
         display: block;
+      }
+      .material-symbols-outlined {
+        font-variation-settings:
+          "FILL" 0,
+          "wght" 400,
+          "GRAD" 0,
+          "opsz" 24;
+      }
+      .glass-panel {
+        background: rgba(25, 25, 31, 0.6);
+        backdrop-filter: blur(20px);
       }
       #hud {
         position: fixed;
         top: 14px;
         right: 14px;
-        z-index: 20;
+        z-index: 60;
         min-width: 190px;
         padding: 12px 12px 10px;
         border-radius: 14px;
@@ -72,7 +168,7 @@
         position: fixed;
         top: 14px;
         left: 14px;
-        z-index: 20;
+        z-index: 60;
         padding: 12px 12px 10px;
         border-radius: 14px;
         background: rgba(10, 18, 32, 0.62);
@@ -87,7 +183,7 @@
         top: 14px;
         left: 50%;
         transform: translateX(-50%);
-        z-index: 30;
+        z-index: 70;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -116,7 +212,7 @@
         flex-direction: column;
         align-items: flex-end;
         gap: 10px;
-        z-index: 35;
+        z-index: 70;
         pointer-events: none;
       }
       .killItem {
@@ -133,174 +229,7 @@
         position: fixed;
         inset: 0;
         z-index: 50;
-        display: grid;
-        place-items: center;
-        background: rgba(10, 18, 32, 0.9);
-      }
-      #startCard {
-        width: min(420px, calc(100vw - 32px));
-        padding: 18px 18px 16px;
-        border-radius: 16px;
-        background: rgba(10, 18, 32, 0.78);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        color: rgba(255, 255, 255, 0.92);
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-        text-align: center;
-        user-select: none;
-      }
-      #startTitle {
-        font-weight: 900;
-        letter-spacing: 0.2px;
-        margin: 0 0 10px;
-      }
-      #startHint {
-        opacity: 0.8;
-        margin: 0 0 14px;
-        font-weight: 650;
-      }
-      #nameRow {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin: 0 0 14px;
-        text-align: right;
-      }
-      #nameLabel {
-        font-weight: 850;
-        opacity: 0.92;
-        letter-spacing: 0.2px;
-      }
-      #nameInput {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 12px 12px;
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        background: rgba(255, 255, 255, 0.06);
-        color: rgba(255, 255, 255, 0.92);
-        font-weight: 800;
-        outline: none;
-      }
-      #nameInput::placeholder {
-        color: rgba(255, 255, 255, 0.45);
-      }
-      #nameInput:focus {
-        border-color: rgba(120, 190, 255, 0.55);
-      }
-      .primaryBtn {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 12px 12px;
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        background: rgba(120, 190, 255, 0.18);
-        color: rgba(255, 255, 255, 0.95);
-        font-weight: 950;
-        cursor: pointer;
-      }
-      .primaryBtn:disabled {
-        opacity: 0.4;
-        cursor: default;
-      }
-      .secondaryBtn {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 10px 12px;
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        background: rgba(255, 255, 255, 0.06);
-        color: rgba(255, 255, 255, 0.92);
-        font-weight: 850;
-        cursor: pointer;
-      }
-      .section {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .fieldLabel {
-        font-weight: 850;
-        opacity: 0.92;
-        letter-spacing: 0.2px;
-        text-align: right;
-      }
-      .textInput {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 12px 12px;
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        background: rgba(255, 255, 255, 0.06);
-        color: rgba(255, 255, 255, 0.92);
-        font-weight: 800;
-        outline: none;
-      }
-      .textInput::placeholder {
-        color: rgba(255, 255, 255, 0.45);
-      }
-      .roomsList {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        max-height: 220px;
         overflow: auto;
-        padding: 8px;
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        background: rgba(255, 255, 255, 0.03);
-      }
-      .roomItem {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 10px;
-        padding: 10px 10px;
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        background: rgba(0, 0, 0, 0.14);
-      }
-      .roomMeta {
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-        min-width: 0;
-      }
-      .roomId {
-        font-weight: 950;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .roomSub {
-        opacity: 0.8;
-        font-weight: 750;
-        font-size: 12px;
-      }
-      .lobbyPlayers {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 8px;
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        background: rgba(255, 255, 255, 0.03);
-      }
-      .playerItem {
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 10px 10px;
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        background: rgba(0, 0, 0, 0.14);
-        font-weight: 850;
-      }
-      #endLeaderboard {
-        margin: 10px 0 14px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        text-align: right;
       }
       .lbTitle {
         font-weight: 900;
@@ -329,31 +258,9 @@
         opacity: 0.9;
         white-space: nowrap;
       }
-      #arenaRow {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        margin: 0 0 6px;
-      }
-      .arenaBtn {
-        appearance: none;
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        padding: 12px 12px;
-        border-radius: 14px;
-        background: rgba(255, 255, 255, 0.06);
-        color: rgba(255, 255, 255, 0.92);
-        font-weight: 900;
-        font-size: 15px;
-        cursor: pointer;
-        text-align: center;
-      }
-      .arenaBtn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
       .arenaBtnActive {
-        border-color: rgba(120, 190, 255, 0.45);
-        background: rgba(120, 190, 255, 0.10);
+        border-color: #00f4fe !important;
+        box-shadow: 0 0 18px rgba(0, 244, 254, 0.18);
       }
       @media (max-width: 600px) {
         #hud {
@@ -410,44 +317,329 @@
     </style>
   </head>
   <body>
-    <div id="startOverlay" dir="rtl">
-      <div id="startCard">
-        <h2 id="startTitle">ابدأ المباراة</h2>
-        <p id="startHint">ادخل User name ثم اختار أو أنشئ Room</p>
-        <div id="stepName" class="section">
-          <div id="nameRow">
-            <div id="nameLabel">User name</div>
-            <input id="nameInput" class="textInput" type="text" dir="auto" autocomplete="nickname" maxlength="18" placeholder="اكتب اسمك" />
-          </div>
-          <button id="continueBtn" class="primaryBtn" type="button">متابعة</button>
+    <div
+      id="startOverlay"
+      dir="rtl"
+      class="bg-background text-on-surface font-body selection:bg-primary selection:text-on-primary min-h-screen flex flex-col"
+    >
+      <header
+        class="sticky top-0 z-50 bg-[#0e0e13]/80 backdrop-blur-xl border-b border-[#00f5ff]/10 flex justify-between items-center w-full px-8 py-4 max-w-full"
+      >
+        <div class="flex items-center gap-8">
+          <span
+            class="text-3xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-[#a1faff] to-[#00f4fe] font-headline"
+            >CUBE ARENA</span
+          >
+          <nav class="hidden md:flex gap-6 font-['Space_Grotesk'] tracking-wider uppercase text-sm">
+            <a class="text-gray-400 hover:text-[#00f5ff] transition-colors" href="#">MAPS</a>
+            <a class="text-[#00f5ff] border-b-2 border-[#00f5ff] pb-1" href="#">LEADERBOARD</a>
+            <a class="text-gray-400 hover:text-[#00f5ff] transition-colors" href="#">SHOP</a>
+          </nav>
         </div>
-        <div id="stepRooms" class="section" style="display: none">
-          <div class="fieldLabel">Rooms المتاحة</div>
-          <div id="roomsList" class="roomsList"></div>
-          <button id="refreshRoomsBtn" class="secondaryBtn" type="button">تحديث</button>
-          <button id="toggleCreateRoomBtn" class="primaryBtn" type="button">إنشاء Room جديدة</button>
-          <div id="createRoomDetails" class="section" style="display: none">
-            <div class="fieldLabel">تفاصيل إنشاء الـ Room</div>
-            <input id="roomIdInput" class="textInput" type="text" dir="ltr" maxlength="24" placeholder="room-id (مثال: magdy1)" />
-            <div id="arenaRow">
-              <button class="arenaBtn" type="button" data-arena="default">الشكل الحالي</button>
-              <button class="arenaBtn" type="button" data-arena="football">ملعب كورة</button>
-              <button class="arenaBtn" type="button" data-arena="tennis">ملعب تنس</button>
-              <button class="arenaBtn" type="button" data-arena="interlock">انترلوك</button>
-              <button class="arenaBtn" type="button" data-arena="geo">أرض هندسية</button>
+        <div class="flex items-center gap-6">
+          <div class="flex items-center gap-3">
+            <button
+              class="p-2 text-gray-400 hover:bg-[#00f5ff]/10 hover:shadow-[0_0_15px_rgba(0,245,255,0.3)] transition-all rounded-lg scale-95 duration-200 ease-in-out"
+              type="button"
+            >
+              <span class="material-symbols-outlined">notifications</span>
+            </button>
+            <button
+              class="p-2 text-gray-400 hover:bg-[#00f5ff]/10 hover:shadow-[0_0_15px_rgba(0,245,255,0.3)] transition-all rounded-lg scale-95 duration-200 ease-in-out"
+              type="button"
+            >
+              <span class="material-symbols-outlined">settings</span>
+            </button>
+          </div>
+          <div class="flex items-center gap-4 bg-surface-container-high px-4 py-1.5 rounded-lg border border-outline-variant/20">
+            <div class="text-right">
+              <p class="text-[10px] font-label text-on-surface-variant tracking-[0.2em] uppercase">OPERATOR_01</p>
+              <p class="text-xs font-headline font-bold text-secondary">LVL 42</p>
             </div>
-            <input id="maxPlayersInput" class="textInput" type="number" min="2" max="20" value="8" />
-            <button id="createRoomBtn" class="primaryBtn" type="button">Create Room</button>
-            <button id="cancelCreateRoomBtn" class="secondaryBtn" type="button">إلغاء</button>
+            <div class="w-10 h-10 rounded bg-surface-container-highest border border-primary/20"></div>
           </div>
+          <button
+            class="bg-gradient-to-r from-[#a1faff] to-[#00f4fe] text-on-primary px-8 py-2 font-headline font-black tracking-widest hover:shadow-[0_0_20px_rgba(161,250,255,0.4)] transition-all active:scale-95"
+            type="button"
+          >
+            PLAY
+          </button>
         </div>
-        <div id="stepLobby" class="section" style="display: none">
-          <div id="lobbyInfo" class="fieldLabel"></div>
-          <div id="lobbyPlayers" class="lobbyPlayers"></div>
-          <button id="startMatchBtn" class="primaryBtn" type="button" disabled>ابدأ اللعب</button>
-          <button id="leaveRoomBtn" class="secondaryBtn" type="button">خروج من الـ Room</button>
-        </div>
-        <div id="endLeaderboard"></div>
+      </header>
+      <div class="flex flex-1 overflow-hidden">
+        <aside class="hidden md:flex flex-col h-full py-6 bg-[#0e0e13] w-64 border-r border-[#00f5ff]/10">
+          <div class="px-6 mb-8">
+            <div class="p-4 rounded-xl bg-surface-container-low border border-outline-variant/10">
+              <div class="flex items-center gap-3 mb-2">
+                <span class="material-symbols-outlined text-primary text-xl">shield</span>
+                <span class="text-xs font-label text-on-surface-variant tracking-widest">RANK: DIAMOND</span>
+              </div>
+              <div class="w-full bg-surface-container-highest h-1 rounded-full overflow-hidden">
+                <div class="bg-primary h-full w-[65%] shadow-[0_0_8px_#a1faff]"></div>
+              </div>
+            </div>
+          </div>
+          <nav class="flex-1 space-y-1">
+            <a
+              class="flex items-center gap-4 text-gray-500 py-3 px-6 hover:bg-white/5 transition-all font-['Space_Grotesk'] font-bold text-sm translate-x-1 duration-150"
+              href="#"
+              >Home</a
+            >
+            <a
+              class="flex items-center gap-4 bg-gradient-to-r from-[#00f5ff]/20 to-transparent text-[#00f5ff] border-l-4 border-[#00f5ff] py-3 px-6 font-['Space_Grotesk'] font-bold text-sm translate-x-1 duration-150"
+              href="#"
+              >Multiplayer</a
+            >
+            <a
+              class="flex items-center gap-4 text-gray-500 py-3 px-6 hover:bg-white/5 transition-all font-['Space_Grotesk'] font-bold text-sm translate-x-1 duration-150"
+              href="#"
+              >Single Player</a
+            >
+            <a
+              class="flex items-center gap-4 text-gray-500 py-3 px-6 hover:bg-white/5 transition-all font-['Space_Grotesk'] font-bold text-sm translate-x-1 duration-150"
+              href="#"
+              >Inventory</a
+            >
+            <a
+              class="flex items-center gap-4 text-gray-500 py-3 px-6 hover:bg-white/5 transition-all font-['Space_Grotesk'] font-bold text-sm translate-x-1 duration-150"
+              href="#"
+              >Profile</a
+            >
+          </nav>
+          <div class="px-6 mt-auto">
+            <button
+              class="w-full py-3 bg-secondary text-on-secondary font-headline font-bold text-sm tracking-widest rounded shadow-[0_0_15px_rgba(50,255,0,0.2)] hover:shadow-[0_0_25px_rgba(50,255,0,0.4)] transition-all"
+              type="button"
+            >
+              UPGRADE
+            </button>
+          </div>
+        </aside>
+        <main
+          id="startCard"
+          class="flex-1 p-8 overflow-y-auto bg-[radial-gradient(circle_at_top_right,_#1a1a2e_0%,_#0e0e13_60%)]"
+        >
+          <div class="max-w-6xl mx-auto mb-8">
+            <h2 id="startTitle" class="font-headline text-2xl font-black text-on-surface uppercase tracking-tight">
+              START
+            </h2>
+            <p id="startHint" class="text-[10px] font-label text-on-surface-variant tracking-[0.2em] uppercase mt-2">
+              ادخل User name ثم اختار أو أنشئ Room
+            </p>
+          </div>
+          <div id="stepName" class="max-w-xl mx-auto">
+            <div class="glass-panel border border-primary/20 rounded-2xl p-8 shadow-[0_0_40px_rgba(0,245,255,0.05)]">
+              <div id="nameRow" class="space-y-3 mt-8">
+                <label class="font-label text-xs font-bold text-on-surface-variant tracking-widest uppercase">User name</label>
+                <input
+                  id="nameInput"
+                  class="w-full bg-surface-container-low border border-outline-variant/30 rounded-lg p-4 font-headline font-bold focus:border-primary focus:ring-0 focus:bg-surface-container-high transition-all text-on-surface"
+                  type="text"
+                  dir="auto"
+                  autocomplete="nickname"
+                  maxlength="18"
+                  placeholder="اكتب اسمك"
+                />
+              </div>
+              <button
+                id="continueBtn"
+                class="w-full py-5 bg-gradient-to-r from-primary to-primary-container text-on-primary font-headline font-black text-lg tracking-[0.3em] rounded-lg shadow-[0_10px_30px_rgba(0,244,254,0.3)] hover:shadow-[0_0_40px_#00f4fe] hover:-translate-y-1 transition-all active:translate-y-0 active:scale-[0.98] mt-8"
+                type="button"
+              >
+                CONTINUE
+              </button>
+            </div>
+          </div>
+
+          <div id="stepRooms" style="display: none">
+            <div class="max-w-6xl mx-auto grid grid-cols-12 gap-8">
+              <div class="col-span-12 lg:col-span-7 flex flex-col gap-6">
+                <div class="flex justify-between items-end">
+                  <div>
+                    <h2 class="font-headline text-3xl font-black text-on-surface tracking-tight">ACTIVE LOBBIES</h2>
+                    <p class="font-label text-on-surface-variant text-xs tracking-[0.2em] uppercase mt-1">SERVERS</p>
+                  </div>
+                  <div class="flex gap-2">
+                    <div class="bg-surface-container-high px-3 py-2 rounded flex items-center gap-2 border border-outline-variant/20">
+                      <span class="material-symbols-outlined text-primary text-sm">search</span>
+                      <input
+                        class="bg-transparent border-none focus:ring-0 text-sm text-on-surface placeholder:text-on-surface-variant/50 w-28"
+                        placeholder="Search ID..."
+                        type="text"
+                      />
+                    </div>
+                    <button
+                      id="refreshRoomsBtn"
+                      class="bg-surface-container-high p-2 rounded hover:bg-surface-container-highest border border-outline-variant/20"
+                      type="button"
+                    >
+                      <span class="material-symbols-outlined text-on-surface">refresh</span>
+                    </button>
+                  </div>
+                </div>
+                <div id="roomsList" class="space-y-4"></div>
+                <button
+                  id="toggleCreateRoomBtn"
+                  class="w-full py-3 bg-surface-container-high text-on-surface font-headline font-bold text-sm tracking-widest rounded border border-outline-variant/20 hover:border-primary transition-all"
+                  type="button"
+                >
+                  CREATE ROOM
+                </button>
+              </div>
+              <div class="col-span-12 lg:col-span-5">
+                <div id="createRoomDetails" class="glass-panel border border-primary/20 rounded-2xl p-8 sticky top-8 shadow-[0_0_40px_rgba(0,245,255,0.05)]" style="display: none">
+                  <div class="flex items-center gap-3 mb-8">
+                    <div class="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
+                      <span class="material-symbols-outlined text-primary">add_box</span>
+                    </div>
+                    <h2 class="font-headline text-2xl font-black text-on-surface uppercase tracking-tight">CREATE ROOM</h2>
+                  </div>
+                  <div class="space-y-8">
+                    <div class="space-y-3">
+                      <label class="font-label text-xs font-bold text-on-surface-variant tracking-widest uppercase"
+                        >Room ID</label
+                      >
+                      <input
+                        id="roomIdInput"
+                        class="w-full bg-surface-container-low border border-outline-variant/30 rounded-lg p-4 font-headline font-bold focus:border-primary focus:ring-0 focus:bg-surface-container-high transition-all text-on-surface"
+                        type="text"
+                        dir="ltr"
+                        maxlength="24"
+                        placeholder="room-id (مثال: magdy1)"
+                      />
+                    </div>
+                    <div class="space-y-3">
+                      <label class="font-label text-xs font-bold text-on-surface-variant tracking-widest uppercase"
+                        >Max Players</label
+                      >
+                      <input
+                        id="maxPlayersInput"
+                        class="w-full bg-surface-container-low border border-outline-variant/30 rounded-lg p-4 font-headline font-bold focus:border-primary focus:ring-0 focus:bg-surface-container-high transition-all text-on-surface"
+                        type="number"
+                        min="2"
+                        max="20"
+                        value="8"
+                      />
+                    </div>
+                    <div class="space-y-4">
+                      <label class="font-label text-xs font-bold text-on-surface-variant tracking-widest uppercase"
+                        >Select Map</label
+                      >
+                      <div id="arenaRow" class="grid grid-cols-2 gap-4">
+                        <button
+                          class="relative group cursor-pointer aspect-video rounded-xl overflow-hidden border-2 border-primary shadow-[0_0_15px_rgba(0,245,255,0.2)]"
+                          type="button"
+                          data-arena="default"
+                        >
+                          <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent"></div>
+                          <div class="absolute bottom-2 left-3 right-3 flex justify-between items-end">
+                            <span class="font-headline font-black text-xs text-on-surface uppercase tracking-tighter"
+                              >Default</span
+                            >
+                            <span class="material-symbols-outlined text-primary text-base" style="font-variation-settings: &quot;FILL&quot; 1"
+                              >check_circle</span
+                            >
+                          </div>
+                        </button>
+                        <button
+                          class="relative group cursor-pointer aspect-video rounded-xl overflow-hidden border border-outline-variant/20 hover:border-secondary transition-all"
+                          type="button"
+                          data-arena="football"
+                        >
+                          <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent"></div>
+                          <div class="absolute bottom-2 left-3 right-3">
+                            <span
+                              class="font-headline font-black text-xs text-on-surface-variant uppercase tracking-tighter group-hover:text-on-surface"
+                              >Football</span
+                            >
+                          </div>
+                        </button>
+                        <button
+                          class="relative group cursor-pointer aspect-video rounded-xl overflow-hidden border border-outline-variant/20 hover:border-tertiary transition-all"
+                          type="button"
+                          data-arena="tennis"
+                        >
+                          <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent"></div>
+                          <div class="absolute bottom-2 left-3 right-3">
+                            <span
+                              class="font-headline font-black text-xs text-on-surface-variant uppercase tracking-tighter group-hover:text-on-surface"
+                              >Tennis</span
+                            >
+                          </div>
+                        </button>
+                        <button
+                          class="relative group cursor-pointer aspect-video rounded-xl overflow-hidden border border-outline-variant/20 hover:border-primary transition-all"
+                          type="button"
+                          data-arena="interlock"
+                        >
+                          <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent"></div>
+                          <div class="absolute bottom-2 left-3 right-3">
+                            <span
+                              class="font-headline font-black text-xs text-on-surface-variant uppercase tracking-tighter group-hover:text-on-surface"
+                              >Interlock</span
+                            >
+                          </div>
+                        </button>
+                        <button
+                          class="relative group cursor-pointer aspect-video rounded-xl overflow-hidden border border-outline-variant/20 hover:border-error transition-all"
+                          type="button"
+                          data-arena="geo"
+                        >
+                          <div class="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent"></div>
+                          <div class="absolute bottom-2 left-3 right-3">
+                            <span
+                              class="font-headline font-black text-xs text-on-surface-variant uppercase tracking-tighter group-hover:text-on-surface"
+                              >Geo</span
+                            >
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      id="createRoomBtn"
+                      class="w-full py-5 bg-gradient-to-r from-primary to-primary-container text-on-primary font-headline font-black text-lg tracking-[0.3em] rounded-lg shadow-[0_10px_30px_rgba(0,244,254,0.3)] hover:shadow-[0_0_40px_#00f4fe] hover:-translate-y-1 transition-all active:translate-y-0 active:scale-[0.98]"
+                      type="button"
+                    >
+                      CREATE ROOM
+                    </button>
+                    <button
+                      id="cancelCreateRoomBtn"
+                      class="w-full py-3 bg-surface-container-high text-on-surface font-headline font-bold text-sm tracking-widest rounded border border-outline-variant/20 hover:border-primary transition-all"
+                      type="button"
+                    >
+                      CANCEL
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="stepLobby" style="display: none">
+            <div class="max-w-3xl mx-auto">
+              <div class="glass-panel border border-primary/20 rounded-2xl p-8 shadow-[0_0_40px_rgba(0,245,255,0.05)]">
+                <div id="lobbyInfo" class="mt-6 text-sm opacity-90"></div>
+                <div id="lobbyPlayers" class="mt-4 space-y-2"></div>
+                <button
+                  id="startMatchBtn"
+                  class="w-full py-5 bg-gradient-to-r from-primary to-primary-container text-on-primary font-headline font-black text-lg tracking-[0.3em] rounded-lg shadow-[0_10px_30px_rgba(0,244,254,0.3)] hover:shadow-[0_0_40px_#00f4fe] hover:-translate-y-1 transition-all active:translate-y-0 active:scale-[0.98] mt-6"
+                  type="button"
+                  disabled
+                >
+                  START MATCH
+                </button>
+                <button
+                  id="leaveRoomBtn"
+                  class="w-full py-3 bg-surface-container-high text-on-surface font-headline font-bold text-sm tracking-widest rounded border border-outline-variant/20 hover:border-primary transition-all mt-3"
+                  type="button"
+                >
+                  LEAVE ROOM
+                </button>
+                <div id="endLeaderboard" class="mt-6"></div>
+              </div>
+            </div>
+          </div>
+        </main>
       </div>
     </div>
     <div id="topCenter" dir="rtl">

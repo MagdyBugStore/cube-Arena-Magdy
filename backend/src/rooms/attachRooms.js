@@ -13,6 +13,9 @@ export function attachRooms(io, netConfig) {
     "room:create",
     "room:join",
     "room:start",
+    "room:started:ack",
+    "client:started",
+    "client:update-sample",
     "room:leave:request",
     "room:leave",
     "room:host-change",
@@ -124,22 +127,28 @@ export function attachRooms(io, netConfig) {
     }));
   }
 
-  if (netConfig?.logSnapshotEnabled) {
-    setInterval(() => {
-      netLog("status", {
-        connections: channelStats.size,
-        rooms: rooms.size,
-        roomsData: summarizeRooms(),
-        connectionsData: summarizeConnections(),
-      });
-    }, Math.max(1000, Number(netConfig?.logIntervalMs) || 5000)).unref?.();
+  let lastRoomsCaseJson = "";
+  function logRoomsCaseIfChanged() {
+    if (netConfig?.roomsCaseEnabled === false) return;
+    const snapshot = summarizeRooms();
+    const json = JSON.stringify(snapshot);
+    if (json === lastRoomsCaseJson) return;
+    lastRoomsCaseJson = json;
+    netLog("rooms:case", { rooms: snapshot });
   }
 
-  if (netConfig?.roomsCaseEnabled !== false) {
-    setInterval(() => {
-      netLog("rooms:case", { rooms: summarizeRooms() });
-    }, Math.max(1000, Number(netConfig?.roomsCaseIntervalMs) || 3000)).unref?.();
+  function logStatus() {
+    if (!netConfig?.logSnapshotEnabled) return;
+    netLog("status", {
+      connections: channelStats.size,
+      rooms: rooms.size,
+      roomsData: summarizeRooms(),
+      connectionsData: summarizeConnections(),
+    });
   }
+
+  logRoomsCaseIfChanged();
+  logStatus();
 
   function sanitizeRoomId(value) {
     if (typeof value !== "string") return null;
@@ -205,12 +214,15 @@ export function attachRooms(io, netConfig) {
 
   function broadcastRoomsList() {
     io.emit("rooms:list", { rooms: roomsListSnapshot() });
+    logRoomsCaseIfChanged();
+    logStatus();
   }
 
   function emitRoomState(roomId) {
     const room = rooms.get(roomId);
     if (!room) return;
     io.room(roomId).emit("room:state", roomSnapshot(room));
+    logStatus();
   }
 
   function emitExistingPlayersTo(channel, room) {
@@ -249,6 +261,30 @@ export function attachRooms(io, netConfig) {
     channelStats.set(id, next);
   }
 
+  function normalizeBinary(raw) {
+    if (raw instanceof ArrayBuffer) return raw;
+    if (ArrayBuffer.isView(raw)) return raw;
+    if (raw && typeof raw === "object" && raw.type === "Buffer" && Array.isArray(raw.data)) {
+      return Uint8Array.from(raw.data);
+    }
+    if (Array.isArray(raw)) {
+      return Uint8Array.from(raw);
+    }
+    return null;
+  }
+
+  function toArrayBuffer(payload) {
+    if (!payload) return null;
+    if (payload instanceof ArrayBuffer) return payload;
+    if (ArrayBuffer.isView(payload)) {
+      return payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength);
+    }
+    return null;
+  }
+
+  const updateDrops = new Map();
+  const updateRxLog = new Map();
+
   function leaveRoom(channel) {
     const roomId = getChannelRoomId(channel);
     if (!roomId) return null;
@@ -284,6 +320,7 @@ export function attachRooms(io, netConfig) {
     channel.emit("welcome", { playerId: channel.id });
     setChannelRoomId(channel, channel.roomId ?? null);
     touchChannel(channel.id, { roomId: getChannelRoomId(channel) });
+    logStatus();
 
     channel.on("rooms:list-request", () => {
       netLog("rooms:list-request", { id: channel.id });
@@ -445,6 +482,72 @@ export function attachRooms(io, netConfig) {
       });
     });
 
+    channel.on("room:started:ack", (payload) => {
+      const roomId = sanitizeRoomId(payload?.roomId) ?? getChannelRoomId(channel);
+      const room = roomId ? rooms.get(roomId) : null;
+      const playerNum = room?.players?.get?.(channel.id)?.num ?? null;
+      netLog("room:started:ack", { id: channel.id, roomId, playerNum });
+      touchChannel(channel.id, {});
+    });
+
+    channel.on("client:started", (payload) => {
+      const roomId = sanitizeRoomId(payload?.roomId) ?? getChannelRoomId(channel);
+      const room = roomId ? rooms.get(roomId) : null;
+      const playerNum = Number(payload?.playerNum) || (room?.players?.get?.(channel.id)?.num ?? null);
+      const joined = payload?.joined === true;
+      const paused = payload?.paused === true;
+      netLog("client:started", { id: channel.id, roomId, playerNum, joined, paused });
+      touchChannel(channel.id, {});
+    });
+
+    channel.on("client:update-sample", (payload) => {
+      const roomId = sanitizeRoomId(payload?.roomId) ?? getChannelRoomId(channel);
+      netLog("client:update-sample", {
+        id: channel.id,
+        roomId,
+        playerNum: payload?.playerNum,
+        reason: payload?.reason,
+        joined: payload?.joined,
+        playing: payload?.playing,
+        connected: payload?.connected,
+        hasChannel: payload?.hasChannel,
+        hasProto: payload?.hasProto,
+        usingRaw: payload?.usingRaw,
+        seq: payload?.seq,
+        x: payload?.x,
+        z: payload?.z,
+        dx: payload?.dx,
+        dz: payload?.dz,
+        hv: payload?.hv,
+        bytes: payload?.bytes,
+      });
+      touchChannel(channel.id, {});
+
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room || !room.players.has(channel.id)) return;
+      io.room(roomId).emit("client:update-sample", {
+        fromId: channel.id,
+        roomId,
+        playerNum: payload?.playerNum,
+        reason: payload?.reason,
+        joined: payload?.joined,
+        playing: payload?.playing,
+        connected: payload?.connected,
+        hasChannel: payload?.hasChannel,
+        hasProto: payload?.hasProto,
+        usingRaw: payload?.usingRaw,
+        seq: payload?.seq,
+        x: payload?.x,
+        z: payload?.z,
+        dx: payload?.dx,
+        dz: payload?.dz,
+        hv: payload?.hv,
+        bytes: payload?.bytes,
+        serverAtMs: Date.now(),
+      });
+    });
+
     channel.on("cube:collect", (payload) => {
       const roomId = getChannelRoomId(channel);
       if (!roomId) return;
@@ -470,12 +573,36 @@ export function attachRooms(io, netConfig) {
       if (!room) return;
       if (!room.players.has(channel.id)) return;
 
-      if (!(raw instanceof ArrayBuffer) && !ArrayBuffer.isView(raw)) return;
-      const bytes = raw instanceof ArrayBuffer ? raw.byteLength : ArrayBuffer.isView(raw) ? raw.byteLength : 0;
+      const normalized = normalizeBinary(raw);
+      const ab = toArrayBuffer(normalized);
+      if (!ab) {
+        const now = Date.now();
+        const prev = updateDrops.get(channel.id) ?? { lastAt: 0 };
+        if (now - prev.lastAt > 2000) {
+          updateDrops.set(channel.id, { lastAt: now });
+          netLog("player:update:drop", {
+            id: channel.id,
+            roomId,
+            rawType: typeof raw,
+            ctor: raw?.constructor?.name,
+            keys: raw && typeof raw === "object" ? Object.keys(raw).slice(0, 8) : null,
+          });
+        }
+        return;
+      }
+      const bytes = ab.byteLength;
       const prev = channelStats.get(channel.id);
       const nextCount = (prev?.updateCount || 0) + 1;
       touchChannel(channel.id, { roomId, updateCount: nextCount, lastUpdateAtMs: Date.now(), lastUpdateBytes: bytes });
-      io.room(roomId).emit("player:update", raw);
+
+      const now = Date.now();
+      const prevLog = updateRxLog.get(channel.id) ?? 0;
+      if (now - prevLog >= 1000) {
+        updateRxLog.set(channel.id, now);
+        netLog("player:update:rx", { id: channel.id, roomId, bytes });
+      }
+
+      io.room(roomId).emit("player:update", ab);
     });
 
     channel.onDisconnect(() => {
@@ -483,6 +610,7 @@ export function attachRooms(io, netConfig) {
       leaveRoom(channel);
       channelStats.delete(channel.id);
       channelRoomIds.delete(channel.id);
+      logStatus();
     });
 
     broadcastRoomsList();

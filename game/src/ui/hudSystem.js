@@ -3,16 +3,18 @@ export function createHudSystem({ hudBoard, players, netState, multiplayerEnable
 
   function ensureHudRows(count) {
     if (!hudBoard) return;
+    hudBoard.classList.add("glass-panel");
     const target = Math.max(0, Number(count) || 0);
     while (hudRows.length < target) {
       const row = document.createElement("div");
-      row.className = "row";
+      row.className =
+        "row flex items-center justify-between gap-3 bg-surface-container-low/40 border border-outline-variant/10 rounded-xl px-3 py-2";
       const rank = document.createElement("span");
-      rank.className = "rank";
+      rank.className = "rank opacity-75 font-black tabular-nums";
       const name = document.createElement("span");
-      name.className = "name";
+      name.className = "name flex-1 truncate font-bold";
       const score = document.createElement("span");
-      score.className = "score";
+      score.className = "score tabular-nums font-black";
       row.append(rank, name, score);
       hudBoard.append(row);
       hudRows.push({ row, rank, name, score });
@@ -66,4 +68,3 @@ export function createHudSystem({ hudBoard, players, netState, multiplayerEnable
 
   return { update };
 }
-
