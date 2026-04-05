@@ -10,6 +10,7 @@ const httpServer = createHttpServer({
   nodeModulesDir: config.paths.nodeModulesDir,
   mimeTypes,
   allowedDepsPrefixes: config.deps.allowedPrefixes,
+  basePath: config.paths.basePath,
 });
 
 const io = geckos();

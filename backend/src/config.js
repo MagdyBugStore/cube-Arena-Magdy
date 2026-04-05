@@ -17,6 +17,13 @@ function envNumber(name, defaultValue) {
   return Number.isFinite(n) ? n : defaultValue;
 }
 
+function normalizeBasePath(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "/") return "";
+  const withLeading = raw.startsWith("/") ? raw : `/${raw}`;
+  return withLeading.endsWith("/") ? withLeading.slice(0, -1) : withLeading;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -27,6 +34,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 
 const PUBLIC_DIR = path.resolve(BACKEND_DIR, "game");
 const NODE_MODULES_DIR = path.resolve(BACKEND_DIR, "node_modules");
+const BASE_PATH = normalizeBasePath(process.env.BASE_PATH || "");
 
 const NET_LOG_ENABLED = envBool("NET_LOG", false);
 const NET_LOG_IMPORTANT_ENABLED = envBool("NET_LOG_IMPORTANT", false);
@@ -41,6 +49,7 @@ export const config = {
   paths: {
     publicDir: PUBLIC_DIR,
     nodeModulesDir: NODE_MODULES_DIR,
+    basePath: BASE_PATH,
   },
   deps: {
     allowedPrefixes: ["@geckos.io/", "@yandeu/", "protobufjs/", "@protobufjs/"],
