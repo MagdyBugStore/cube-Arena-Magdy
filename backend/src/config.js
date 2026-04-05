@@ -25,7 +25,7 @@ const BACKEND_DIR = path.resolve(__dirname, "..");
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || "0.0.0.0";
 
-const PUBLIC_DIR = path.resolve(BACKEND_DIR, "..", "game");
+const PUBLIC_DIR = path.resolve(BACKEND_DIR, "game");
 const NODE_MODULES_DIR = path.resolve(BACKEND_DIR, "node_modules");
 
 const NET_LOG_ENABLED = envBool("NET_LOG", false);
