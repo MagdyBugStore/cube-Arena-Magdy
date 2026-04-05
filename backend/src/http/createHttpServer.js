@@ -89,19 +89,29 @@ export function createHttpServer({ publicDir, nodeModulesDir, mimeTypes, allowed
   const base = normalizeBasePath(basePath);
 
   return http.createServer((req, res) => {
+    const rawUrl = String(req.url ?? "");
+    if (!rawUrl) return sendJson(res, 400, { error: "Bad Request" });
+
+    const { path: rawPath, suffix } = splitUrl(rawUrl);
+    if (base && rawPath === base && (req.method === "GET" || req.method === "HEAD")) {
+      res.writeHead(308, { Location: `${base}/${suffix}` });
+      res.end();
+      return;
+    }
+
+    const routedUrl = stripBaseFromUrl(rawUrl, base);
+    const { path: routedPath } = splitUrl(routedUrl);
+
+    if (
+      routedPath === "/.wrtc" ||
+      routedPath.startsWith("/.wrtc/") ||
+      routedPath === "/socket.io" ||
+      routedPath.startsWith("/socket.io/")
+    ) {
+      return;
+    }
+
     if (!req.method || req.method === "GET" || req.method === "HEAD") {
-      const rawUrl = String(req.url ?? "");
-      if (!rawUrl) return sendJson(res, 400, { error: "Bad Request" });
-
-      const { path: rawPath, suffix } = splitUrl(rawUrl);
-      if (base && rawPath === base && (req.method === "GET" || req.method === "HEAD")) {
-        res.writeHead(308, { Location: `${base}/${suffix}` });
-        res.end();
-        return;
-      }
-
-      const routedUrl = stripBaseFromUrl(rawUrl, base);
-      const { path: routedPath } = splitUrl(routedUrl);
       if (routedPath.startsWith("/_deps/")) return serveDeps(req, res, routedUrl);
       return serveStatic(req, res, routedUrl);
     }

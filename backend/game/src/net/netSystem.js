@@ -266,8 +266,10 @@ message PlayerUpdate {
   function ensureChannel() {
     if (!multiplayerEnabled) return null;
     if (netState.channel) return netState.channel;
+    const baseDir = new URL(".", globalThis.location?.href ?? "").pathname;
+    const basePath = baseDir === "/" ? "" : baseDir.replace(/\/$/, "");
     const channel = geckos({
-      url: globalThis.location?.origin ?? "",
+      url: `${globalThis.location?.origin ?? ""}${basePath}`,
       port: null,
     });
     netState.channel = channel;
