@@ -16,6 +16,7 @@ const io = geckos();
 io.addServer(httpServer);
 attachRooms(io, config.net);
 
+
 function getLanIpv4Addresses() {
   const nets = os.networkInterfaces();
   const ips = [];
