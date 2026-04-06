@@ -102,6 +102,9 @@ export function createNetSystem({
     onLobbyState: null,
     onRoomStarted: null,
     onRoomError: null,
+    onPvpEliminate: null,
+    onPvpTailEaten: null,
+    onPvpHeadBump: null,
   };
 
   const lastPayloads = {
@@ -136,6 +139,18 @@ export function createNetSystem({
       typeof next?.onRoomError === "function"
         ? next.onRoomError
         : handlers.onRoomError;
+    handlers.onPvpEliminate =
+      typeof next?.onPvpEliminate === "function"
+        ? next.onPvpEliminate
+        : handlers.onPvpEliminate;
+    handlers.onPvpTailEaten =
+      typeof next?.onPvpTailEaten === "function"
+        ? next.onPvpTailEaten
+        : handlers.onPvpTailEaten;
+    handlers.onPvpHeadBump =
+      typeof next?.onPvpHeadBump === "function"
+        ? next.onPvpHeadBump
+        : handlers.onPvpHeadBump;
     replayLastPayloads();
   }
 
@@ -158,6 +173,9 @@ export function createNetSystem({
   const NET_POS_SCALE = 100;
   const NET_DIR_SCALE = 10000;
   const NET_SEND_HZ = 15;
+  const NET_INTERP_DELAY_MS = 90;
+  const NET_EXTRAP_MAX_MS = 140;
+  const NET_MAX_SAMPLES = 32;
   const NET_PROTO_SCHEMA = `syntax = "proto3";
 
 package net;
@@ -223,6 +241,10 @@ message PlayerUpdate {
       target: null,
       dir: null,
       lastSeenAtMs: 0,
+      samples: [],
+      kick: { vx: 0, vz: 0, lastAtMs: 0 },
+      forceHv: null,
+      forceHvUntilMs: 0,
     };
     netState.remotes.set(remoteId, entry);
     if (playerNum > 0) netState.remotesByNum.set(playerNum, entry);
@@ -520,19 +542,33 @@ message PlayerUpdate {
       const entry = netState.remotesByNum.get(pid);
       if (!entry) return;
 
-      entry.lastSeenAtMs = performance.now();
+      entry.lastSeenAtMs = nowMs;
       const x = Number(decoded?.x) / NET_POS_SCALE;
       const z = Number(decoded?.z) / NET_POS_SCALE;
-      if (Number.isFinite(x) && Number.isFinite(z)) {
-        entry.target = { x, y: 0, z };
-        if (entry.player?.head?.mesh) entry.player.head.mesh.visible = true;
-      }
       const dx = Number(decoded?.dx) / NET_DIR_SCALE;
       const dz = Number(decoded?.dz) / NET_DIR_SCALE;
-      if (Number.isFinite(dx) && Number.isFinite(dz))
-        entry.dir = { x: dx, z: dz };
       const hv = Number(decoded?.hv);
-      if (Number.isFinite(hv) && hv > 0) entry.player.setHeadValue(hv);
+      if (Number.isFinite(x) && Number.isFinite(z)) {
+        if (entry.player?.head?.mesh) entry.player.head.mesh.visible = true;
+        const list = Array.isArray(entry.samples) ? entry.samples : [];
+        entry.samples = list;
+        const lastT = list.length > 0 ? Number(list[list.length - 1]?.t) || 0 : 0;
+        const t = nowMs > lastT ? nowMs : lastT + 0.001;
+        list.push({
+          t,
+          x,
+          z,
+          dx: Number.isFinite(dx) ? dx : null,
+          dz: Number.isFinite(dz) ? dz : null,
+          hv:
+            entry.forceHvUntilMs > nowMs && Number.isFinite(Number(entry.forceHv))
+              ? Number(entry.forceHv)
+              : Number.isFinite(hv)
+                ? hv
+                : null,
+        });
+        if (list.length > NET_MAX_SAMPLES) list.splice(0, list.length - NET_MAX_SAMPLES);
+      }
     }
 
     channel.on("player:update", handleIncomingPlayerUpdate);
@@ -565,6 +601,48 @@ message PlayerUpdate {
       if (!target) return;
       target.enqueueTailValue(value);
       getStats(target).score += value;
+    });
+
+    channel.on("pvp:eliminate", (payload) => {
+      if (!multiplayerEnabled) return;
+      if (!getMatchActive?.()) return;
+      if (!payload?.roomId) return;
+      if (netState.roomId && payload.roomId !== netState.roomId) return;
+      if (handlers.onPvpEliminate) {
+        try {
+          handlers.onPvpEliminate(payload);
+        } catch (e) {
+          reportHandlerError("onPvpEliminate", e);
+        }
+      }
+    });
+
+    channel.on("pvp:tail-eaten", (payload) => {
+      if (!multiplayerEnabled) return;
+      if (!getMatchActive?.()) return;
+      if (!payload?.roomId) return;
+      if (netState.roomId && payload.roomId !== netState.roomId) return;
+      if (handlers.onPvpTailEaten) {
+        try {
+          handlers.onPvpTailEaten(payload);
+        } catch (e) {
+          reportHandlerError("onPvpTailEaten", e);
+        }
+      }
+    });
+
+    channel.on("pvp:head-bump", (payload) => {
+      if (!multiplayerEnabled) return;
+      if (!getMatchActive?.()) return;
+      if (!payload?.roomId) return;
+      if (netState.roomId && payload.roomId !== netState.roomId) return;
+      if (handlers.onPvpHeadBump) {
+        try {
+          handlers.onPvpHeadBump(payload);
+        } catch (e) {
+          reportHandlerError("onPvpHeadBump", e);
+        }
+      }
     });
 
     return channel;
@@ -783,7 +861,7 @@ message PlayerUpdate {
       }
     }
 
-    const alpha = 1 - Math.pow(0.0001, (Number(dt) || 0) * 10);
+    const alpha = 1 - Math.pow(0.0001, (Number(dt) || 0) * 16);
     const staleMs = 120000;
     for (const [id, entry] of netState.remotes.entries()) {
       const p = entry.player;
@@ -792,23 +870,84 @@ message PlayerUpdate {
         continue;
       }
 
-      const target = entry.target;
-      if (target) {
-        const mesh = p.head.mesh;
-        mesh.position.x = THREE.MathUtils.lerp(
-          mesh.position.x,
-          target.x,
-          alpha,
-        );
-        mesh.position.z = THREE.MathUtils.lerp(
-          mesh.position.z,
-          target.z,
-          alpha,
-        );
-        mesh.position.y = p.head.size / 2;
+      const samples = Array.isArray(entry.samples) ? entry.samples : null;
+      if (!samples || samples.length === 0) continue;
+
+      const renderAtMs = nowMs - NET_INTERP_DELAY_MS;
+      while (samples.length > 2 && Number(samples[1]?.t) <= renderAtMs) samples.shift();
+
+      const first = samples[0] ?? null;
+      const second = samples[1] ?? null;
+      const last = samples[samples.length - 1] ?? null;
+      const prev = samples.length >= 2 ? samples[samples.length - 2] : null;
+      if (!first || !last) continue;
+
+      let x = Number(last.x) || 0;
+      let z = Number(last.z) || 0;
+      let dx = Number(last.dx);
+      let dz = Number(last.dz);
+
+      if (second && Number(first.t) <= renderAtMs && renderAtMs <= Number(second.t)) {
+        const t0 = Number(first.t) || 0;
+        const t1 = Number(second.t) || 0;
+        const span = t1 - t0;
+        const u = span > 0 ? (renderAtMs - t0) / span : 1;
+        x = THREE.MathUtils.lerp(Number(first.x) || 0, Number(second.x) || 0, u);
+        z = THREE.MathUtils.lerp(Number(first.z) || 0, Number(second.z) || 0, u);
+        dx = Number(second.dx);
+        dz = Number(second.dz);
+      } else if (renderAtMs < Number(first.t)) {
+        x = Number(first.x) || 0;
+        z = Number(first.z) || 0;
+        dx = Number(first.dx);
+        dz = Number(first.dz);
+      } else if (prev && renderAtMs > Number(last.t)) {
+        const t0 = Number(prev.t) || 0;
+        const t1 = Number(last.t) || 0;
+        const span = t1 - t0;
+        const extra = Math.min(NET_EXTRAP_MAX_MS, Math.max(0, renderAtMs - t1));
+        if (span > 0 && extra > 0) {
+          const vx = ((Number(last.x) || 0) - (Number(prev.x) || 0)) / span;
+          const vz = ((Number(last.z) || 0) - (Number(prev.z) || 0)) / span;
+          x = (Number(last.x) || 0) + vx * extra;
+          z = (Number(last.z) || 0) + vz * extra;
+          if (!Number.isFinite(dx) || !Number.isFinite(dz)) {
+            const len = Math.sqrt(vx * vx + vz * vz) || 1;
+            dx = vx / len;
+            dz = vz / len;
+          }
+        }
       }
-      const d = entry.dir;
-      if (d) p.setLookDirFromMove(d.x, d.z);
+
+      const hv = Number(last.hv);
+      const forced =
+        entry.forceHvUntilMs > nowMs && Number.isFinite(Number(entry.forceHv))
+          ? Number(entry.forceHv)
+          : null;
+      const finalHv = Number.isFinite(forced) ? forced : hv;
+      if (Number.isFinite(finalHv) && finalHv > 0) {
+        const currentHv = Number(p.head?.value) || 0;
+        if (currentHv !== finalHv) p.setHeadValue(finalHv);
+      }
+
+      const mesh = p.head.mesh;
+      const kick = entry.kick;
+      if (kick) {
+        const lastAt = Number(kick.lastAtMs) || nowMs;
+        const dtMs = Math.max(0, Math.min(120, nowMs - lastAt));
+        const dtSec = dtMs / 1000;
+        x += (Number(kick.vx) || 0) * dtSec;
+        z += (Number(kick.vz) || 0) * dtSec;
+        const damp = Math.pow(0.02, dtSec);
+        kick.vx = (Number(kick.vx) || 0) * damp;
+        kick.vz = (Number(kick.vz) || 0) * damp;
+        kick.lastAtMs = nowMs;
+      }
+      mesh.position.x = THREE.MathUtils.lerp(mesh.position.x, x, alpha);
+      mesh.position.z = THREE.MathUtils.lerp(mesh.position.z, z, alpha);
+      mesh.position.y = p.head.size / 2;
+
+      if (Number.isFinite(dx) && Number.isFinite(dz)) p.setLookDirFromMove(dx, dz);
     }
   }
 
@@ -835,6 +974,78 @@ message PlayerUpdate {
     return true;
   }
 
+  function isHost() {
+    if (!multiplayerEnabled) return false;
+    const hostId = String(netState.lobby?.hostId ?? "");
+    const me = String(netState.playerId ?? "");
+    return Boolean(hostId && me && hostId === me);
+  }
+
+  function requestPvpEliminate({ killerNum, victimNum, respawn, resetValue, respawnDelayMs } = {}) {
+    if (!multiplayerEnabled) return false;
+    const channel = netState.channel;
+    if (!channel || !netState.joined) return false;
+    const roomId = String(netState.roomId ?? "");
+    if (!roomId) return false;
+    const k = Number(killerNum) || 0;
+    const v = Number(victimNum) || 0;
+    if (!k || !v || k === v) return false;
+    const rv = Number(resetValue);
+    const nextResetValue = Number.isFinite(rv) && rv > 0 ? rv : 1;
+    const delay = Math.max(0, Math.min(10000, Number(respawnDelayMs) || 0));
+    const x = Number(respawn?.x);
+    const z = Number(respawn?.z);
+    const dx = Number(respawn?.dx);
+    const dz = Number(respawn?.dz);
+    const hasSpawn = Number.isFinite(x) && Number.isFinite(z);
+    channel.emit("pvp:eliminate", {
+      roomId,
+      killerNum: k,
+      victimNum: v,
+      resetValue: nextResetValue,
+      respawnDelayMs: delay,
+      respawn: hasSpawn ? { x, z, dx: Number.isFinite(dx) ? dx : 0, dz: Number.isFinite(dz) ? dz : 0 } : null,
+    });
+    return true;
+  }
+
+  function requestPvpTailEaten({ eaterNum, ownerNum, segIndex, segValue } = {}) {
+    if (!multiplayerEnabled) return false;
+    const channel = netState.channel;
+    if (!channel || !netState.joined) return false;
+    const roomId = String(netState.roomId ?? "");
+    if (!roomId) return false;
+    const eater = Number(eaterNum) || 0;
+    const owner = Number(ownerNum) || 0;
+    const idx = Number(segIndex);
+    const value = Number(segValue);
+    if (!eater || !owner || eater === owner) return false;
+    if (!Number.isInteger(idx) || idx < 0) return false;
+    if (!Number.isFinite(value) || value <= 0) return false;
+    channel.emit("pvp:tail-eaten", { roomId, eaterNum: eater, ownerNum: owner, segIndex: idx, segValue: value });
+    return true;
+  }
+
+  function requestPvpHeadBump({ aNum, bNum, nx, nz, impulse, stunSec } = {}) {
+    if (!multiplayerEnabled) return false;
+    const channel = netState.channel;
+    if (!channel || !netState.joined) return false;
+    const roomId = String(netState.roomId ?? "");
+    if (!roomId) return false;
+    const a = Number(aNum) || 0;
+    const b = Number(bNum) || 0;
+    const x = Number(nx);
+    const z = Number(nz);
+    const s = Number(stunSec);
+    const k = Number(impulse);
+    if (!a || !b || a === b) return false;
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+    if (!Number.isFinite(k) || k <= 0) return false;
+    if (!Number.isFinite(s) || s < 0) return false;
+    channel.emit("pvp:head-bump", { roomId, aNum: a, bNum: b, nx: x, nz: z, impulse: k, stunSec: s });
+    return true;
+  }
+
   return {
     netState,
     netLog,
@@ -849,5 +1060,9 @@ message PlayerUpdate {
     update,
     onMatchStarted,
     requestCollectCube,
+    isHost,
+    requestPvpEliminate,
+    requestPvpTailEaten,
+    requestPvpHeadBump,
   };
 }

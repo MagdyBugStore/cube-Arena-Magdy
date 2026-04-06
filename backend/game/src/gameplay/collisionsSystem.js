@@ -93,6 +93,152 @@ export function createCollisionsSystem({
   function update() {
     if (multiplayerEnabled) {
       if (getPlayerJoined?.()) resolvePlayerVsFreeCubes(player);
+      if (!getPlayerJoined?.()) return;
+      if (typeof net?.isHost === "function" && !net.isHost()) return;
+
+      const now = performance.now() * 0.001;
+
+      for (const eater of players) {
+        if (!eater?.head?.mesh) continue;
+        const eaterNum = eater === player ? Number(net?.netState?.playerNum) || 0 : Number(eater?.remoteNum) || 0;
+        if (!eaterNum) continue;
+        const eaterPos = eater.head.mesh.position;
+        const eaterValue = eater.head.value ?? 0;
+        const eaterSize = eater.head.size ?? 0;
+
+        for (const owner of players) {
+          if (!owner || owner === eater) continue;
+          if (!Array.isArray(owner.tail) || owner.tail.length === 0) continue;
+
+          const ownerNum = owner === player ? Number(net?.netState?.playerNum) || 0 : Number(owner?.remoteNum) || 0;
+          if (!ownerNum) continue;
+
+          for (let segIndex = owner.tail.length - 1; segIndex >= 0; segIndex -= 1) {
+            const seg = owner.tail[segIndex];
+            if (!seg?.mesh) continue;
+
+            const dx = eaterPos.x - seg.mesh.position.x;
+            const dz = eaterPos.z - seg.mesh.position.z;
+            const r = eaterSize / 2 + (seg.size ?? 0) / 2 + 0.01;
+            const contactGap = r + EXPLOSION.contactGap;
+            const d2xz = dx * dx + dz * dz;
+            if (d2xz >= contactGap * contactGap) continue;
+
+            const segValue = seg.value ?? 0;
+            if (segValue <= eaterValue) {
+              const key = `${eaterNum}|${ownerNum}|${segIndex}`;
+              const last = headHeadCooldown.get(key) ?? -1e9;
+              if (now - last > 0.15) {
+                headHeadCooldown.set(key, now);
+                net?.requestPvpTailEaten?.({
+                  eaterNum,
+                  ownerNum,
+                  segIndex,
+                  segValue,
+                });
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < players.length; i += 1) {
+        const a = players[i];
+        if (!a?.head?.mesh) continue;
+        for (let j = i + 1; j < players.length; j += 1) {
+          const b = players[j];
+          if (!b?.head?.mesh) continue;
+
+          const aNum = a === player ? Number(net?.netState?.playerNum) || 0 : Number(a?.remoteNum) || 0;
+          const bNum = b === player ? Number(net?.netState?.playerNum) || 0 : Number(b?.remoteNum) || 0;
+          if (!aNum || !bNum) continue;
+
+          const aPos = a.head.mesh.position;
+          const bPos = b.head.mesh.position;
+          const dx = bPos.x - aPos.x;
+          const dz = bPos.z - aPos.z;
+          const r = (a.head.size + b.head.size) / 2;
+          const d2 = dx * dx + dz * dz;
+          const contactGap = r + EXPLOSION.contactGap;
+          if (d2 >= contactGap * contactGap || d2 < 1e-10) continue;
+
+          const aValue = a.head.value ?? 0;
+          const bValue = b.head.value ?? 0;
+          const dist = Math.sqrt(d2) || 1;
+          const penetration = r - dist + 0.02;
+          const nx = dx / dist;
+          const nz = dz / dist;
+
+          if (aValue === bValue) {
+            if (penetration <= 0) continue;
+            const key = pairKey(a, b);
+            const last = headHeadCooldown.get(key) ?? -1e9;
+            if (now - last > EXPLOSION.headHeadCooldownSec) {
+              headHeadCooldown.set(key, now);
+              const impulse = Math.min(12, Math.max(0, penetration) * 26);
+              if (impulse > 0) {
+                net?.requestPvpHeadBump?.({
+                  aNum,
+                  bNum,
+                  nx,
+                  nz,
+                  impulse,
+                  stunSec: 0.65,
+                });
+              }
+            }
+            continue;
+          }
+
+          const eater = aValue > bValue ? a : b;
+          const victim = eater === a ? b : a;
+          const eaterNum = eater === player ? Number(net?.netState?.playerNum) || 0 : Number(eater?.remoteNum) || 0;
+          const victimNum = victim === player ? Number(net?.netState?.playerNum) || 0 : Number(victim?.remoteNum) || 0;
+          if (!eaterNum || !victimNum) continue;
+
+          const key = pairKey(a, b);
+          const last = headHeadCooldown.get(key) ?? -1e9;
+          if (now - last > EXPLOSION.headHeadCooldownSec) {
+            headHeadCooldown.set(key, now);
+            const { halfX, halfZ } = halfBoundsFor(victim);
+            const margin = (victim.head.size ?? 0) * 0.3 + 2.2;
+            const minX = -halfX + margin;
+            const maxX = halfX - margin;
+            const minZ = -halfZ + margin;
+            const maxZ = halfZ - margin;
+            let rx = 0;
+            let rz = 0;
+            let ok = false;
+            for (let t = 0; t < 30; t += 1) {
+              rx = minX + Math.random() * Math.max(0.001, maxX - minX);
+              rz = minZ + Math.random() * Math.max(0.001, maxZ - minZ);
+              ok = true;
+              for (const other of players) {
+                if (!other?.head?.mesh) continue;
+                if (other === victim) continue;
+                const pos = other.head.mesh.position;
+                const ddx = pos.x - rx;
+                const ddz = pos.z - rz;
+                if (ddx * ddx + ddz * ddz < 14 * 14) {
+                  ok = false;
+                  break;
+                }
+              }
+              if (ok) break;
+            }
+            const ang = Math.random() * Math.PI * 2;
+            net?.requestPvpEliminate?.({
+              killerNum: eaterNum,
+              victimNum,
+              resetValue: 2,
+              respawnDelayMs: 3000,
+              respawn: { x: rx, z: rz, dx: Math.cos(ang), dz: Math.sin(ang) },
+            });
+          }
+        }
+      }
+
       return;
     }
 
@@ -235,4 +381,3 @@ export function createCollisionsSystem({
 
   return { update };
 }
-

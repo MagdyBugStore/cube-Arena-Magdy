@@ -1,6 +1,12 @@
 export function createHudSystem({ hudBoard, players, netState, multiplayerEnabled, getStats, getPlayerName } = {}) {
   const hudRows = [];
 
+  function playerKey(p) {
+    if (!p) return "";
+    if (p.isRemote) return `r:${String(p.remoteId ?? "") || String(p.remoteNum ?? "") || String(p?.head?.mesh?.uuid ?? "")}`;
+    return `l:${String(p?.head?.mesh?.uuid ?? "")}`;
+  }
+
   function ensureHudRows(count) {
     if (!hudBoard) return;
     hudBoard.classList.add("glass-panel");
@@ -26,7 +32,11 @@ export function createHudSystem({ hudBoard, players, netState, multiplayerEnable
   }
 
   function updateScoreFromHeadValue() {
+    const seen = new Set();
     for (const p of players ?? []) {
+      const key = playerKey(p);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
       const s = getStats(p);
       const v = p.head.value ?? 0;
       if (v > s.lastHeadValue) s.score += v - s.lastHeadValue;
@@ -37,12 +47,25 @@ export function createHudSystem({ hudBoard, players, netState, multiplayerEnable
   function updateBoard() {
     if (!hudBoard) return;
 
-    const remotes = multiplayerEnabled ? Array.from(netState?.remotes?.values?.() ?? []).map((e) => e.player) : [];
-    const allPlayers = remotes.length > 0 ? (players ?? []).concat(remotes) : players ?? [];
-    const board = allPlayers
-      .filter((p) => p?.head)
-      .map((p) => ({ p }))
-      .sort((a, b) => (b.p.head.value ?? 0) - (a.p.head.value ?? 0));
+    const merged = [];
+    const seen = new Set();
+
+    function add(p) {
+      const key = playerKey(p);
+      if (!key || seen.has(key)) return;
+      if (!p?.head) return;
+      seen.add(key);
+      merged.push(p);
+    }
+
+    for (const p of players ?? []) add(p);
+    if (multiplayerEnabled) {
+      for (const e of netState?.remotes?.values?.() ?? []) add(e?.player);
+    }
+
+    const board = merged
+      .map((p) => ({ p, kills: Number(getStats(p)?.kills) || 0, value: Number(p?.head?.value) || 0 }))
+      .sort((a, b) => (b.kills ?? 0) - (a.kills ?? 0) || (b.value ?? 0) - (a.value ?? 0));
 
     ensureHudRows(board.length);
 
@@ -57,7 +80,7 @@ export function createHudSystem({ hudBoard, players, netState, multiplayerEnable
       }
       row.rank.textContent = String(i + 1);
       row.name.textContent = getPlayerName(entry.p);
-      row.score.textContent = String(entry.p.head.value ?? 0);
+      row.score.textContent = String(multiplayerEnabled ? (entry.kills ?? 0) : (entry.value ?? 0));
     }
   }
 

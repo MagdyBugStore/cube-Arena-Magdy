@@ -802,11 +802,136 @@ function startMatchFromRoom(payload) {
 // =========================
 lobbyUi.bind();
 
+function getPlayerByNum(num) {
+  const n = Number(num) || 0;
+  if (!n) return null;
+  if (netState.playerNum && n === netState.playerNum) return player;
+  return netState.remotesByNum.get(n)?.player ?? null;
+}
+
 net.setHandlers({
   onRoomsList: lobbyUi.renderRoomsList,
   onLobbyState: lobbyUi.renderLobby,
   onRoomStarted: startMatchFromRoom,
   onRoomError: (message) => lobbyUi.setStartHintText(message),
+  onPvpEliminate: (payload) => {
+    const killerNum = Number(payload?.killerNum) || 0;
+    const victimNum = Number(payload?.victimNum) || 0;
+    if (!killerNum || !victimNum || killerNum === victimNum) return;
+    const killer = getPlayerByNum(killerNum);
+    const victim = getPlayerByNum(victimNum);
+    if (!killer || !victim) return;
+    if (!killer.head?.mesh || !victim.head?.mesh) return;
+
+    const victimValue = victim.head.value ?? 0;
+    killer.enqueueTailValue(victimValue);
+    const killerStats = getStats(killer);
+    killerStats.kills += 1;
+    killerStats.score += Math.max(0, victimValue) * 2;
+    addKillNotification(killer, victim);
+
+    const resetValue = Math.max(1, Number(payload?.resetValue) || 2);
+    const respawnDelayMs = Math.max(0, Math.min(10000, Number(payload?.respawnDelayMs) || 0));
+    const respawn = payload?.respawn ?? null;
+
+    victim.eliminated = true;
+    if (typeof victim.clearTail === "function") victim.clearTail();
+    if (victim.head?.mesh) victim.head.mesh.visible = false;
+
+    const idx = players.indexOf(victim);
+    if (idx >= 0) players.splice(idx, 1);
+    if (env.updatables?.delete) env.updatables.delete(victim);
+
+    if (victim === player) {
+      playerJoined = false;
+      pressed.clear();
+    }
+
+    globalThis.setTimeout(() => {
+      const victimStats = getStats(victim);
+      if (victimStats) victimStats.lastHeadValue = resetValue;
+      victim.setHeadValue(resetValue);
+      victim.eliminated = false;
+      if (victim.head?.mesh) victim.head.mesh.visible = true;
+
+      if (victim.isRemote) {
+        const entry = netState.remotesByNum.get(Number(victimNum) || 0);
+        if (entry) {
+          entry.forceHv = resetValue;
+          entry.forceHvUntilMs = performance.now() + 1500;
+        }
+      }
+
+      if (respawn) {
+        victim.setPosition(Number(respawn.x) || 0, victim.head.size / 2, Number(respawn.z) || 0);
+        victim.setLookDirFromMove(Number(respawn.dx) || 0, Number(respawn.dz) || 0);
+      }
+
+      if (!players.includes(victim)) players.push(victim);
+      env.addUpdatable(victim);
+      if (victim === player) playerJoined = true;
+    }, respawnDelayMs);
+  },
+  onPvpTailEaten: (payload) => {
+    const eaterNum = Number(payload?.eaterNum) || 0;
+    const ownerNum = Number(payload?.ownerNum) || 0;
+    const segIndex = Number(payload?.segIndex);
+    const segValue = Number(payload?.segValue);
+    if (!eaterNum || !ownerNum || eaterNum === ownerNum) return;
+    if (!Number.isInteger(segIndex) || segIndex < 0) return;
+    if (!Number.isFinite(segValue) || segValue <= 0) return;
+
+    const eater = getPlayerByNum(eaterNum);
+    const owner = getPlayerByNum(ownerNum);
+    if (!eater || !owner) return;
+    if (owner.eliminated || eater.eliminated) return;
+    if (!Array.isArray(owner.tail) || owner.tail.length === 0) return;
+    if (segIndex >= owner.tail.length) return;
+
+    dropTailFromIndex(owner, segIndex + 1);
+    removeTailAt(owner, segIndex);
+    eater.enqueueTailValue(segValue);
+    getStats(eater).score += Math.max(0, segValue);
+  },
+  onPvpHeadBump: (payload) => {
+    const aNum = Number(payload?.aNum) || 0;
+    const bNum = Number(payload?.bNum) || 0;
+    if (!aNum || !bNum || aNum === bNum) return;
+    const a = getPlayerByNum(aNum);
+    const b = getPlayerByNum(bNum);
+    if (!a || !b) return;
+    const nx = Number(payload?.nx);
+    const nz = Number(payload?.nz);
+    const impulse = Number(payload?.impulse);
+    const stunSec = Number(payload?.stunSec);
+    if (!Number.isFinite(nx) || !Number.isFinite(nz)) return;
+    if (!Number.isFinite(impulse) || impulse <= 0) return;
+    if (!Number.isFinite(stunSec) || stunSec < 0) return;
+
+    const len = Math.sqrt(nx * nx + nz * nz) || 1;
+    const ux = nx / len;
+    const uz = nz / len;
+    if (!a.isRemote) {
+      a.applyExplosion(-ux, -uz, { speed: impulse, stunSec });
+    } else {
+      const entry = netState.remotesByNum.get(aNum);
+      if (entry?.kick) {
+        entry.kick.vx = (Number(entry.kick.vx) || 0) + -ux * impulse;
+        entry.kick.vz = (Number(entry.kick.vz) || 0) + -uz * impulse;
+        entry.kick.lastAtMs = performance.now();
+      }
+    }
+    if (!b.isRemote) {
+      b.applyExplosion(ux, uz, { speed: impulse, stunSec });
+    } else {
+      const entry = netState.remotesByNum.get(bNum);
+      if (entry?.kick) {
+        entry.kick.vx = (Number(entry.kick.vx) || 0) + ux * impulse;
+        entry.kick.vz = (Number(entry.kick.vz) || 0) + uz * impulse;
+        entry.kick.lastAtMs = performance.now();
+      }
+    }
+  },
 });
 
 lobbyUi.showStartOverlayDefault();

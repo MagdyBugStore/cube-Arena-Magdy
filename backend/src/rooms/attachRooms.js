@@ -592,6 +592,86 @@ export function attachRooms(io, netConfig) {
       io.room(roomId).emit("tail:enqueue", { playerNum: player.num, value: cube.value });
     });
 
+    channel.on("pvp:eliminate", (payload) => {
+      const roomId = sanitizeRoomId(payload?.roomId) ?? getChannelRoomId(channel);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room || room.status !== "started") return;
+      if (room.hostId !== channel.id) return;
+
+      const killerNum = Number(payload?.killerNum) || 0;
+      const victimNum = Number(payload?.victimNum) || 0;
+      if (!killerNum || !victimNum || killerNum === victimNum) return;
+
+      const playersList = Array.from(room.players.values());
+      const killer = playersList.find((p) => Number(p?.num) === killerNum);
+      const victim = playersList.find((p) => Number(p?.num) === victimNum);
+      if (!killer || !victim) return;
+
+      const rv = Number(payload?.resetValue);
+      const resetValue = Number.isFinite(rv) && rv > 0 ? rv : 1;
+      const delay = Math.max(0, Math.min(10000, Number(payload?.respawnDelayMs) || 0));
+      const x = Number(payload?.respawn?.x);
+      const z = Number(payload?.respawn?.z);
+      const dx = Number(payload?.respawn?.dx);
+      const dz = Number(payload?.respawn?.dz);
+      const respawn =
+        Number.isFinite(x) && Number.isFinite(z)
+          ? { x, z, dx: Number.isFinite(dx) ? dx : 0, dz: Number.isFinite(dz) ? dz : 0 }
+          : null;
+
+      io.room(roomId).emit("pvp:eliminate", { roomId, killerNum, victimNum, resetValue, respawnDelayMs: delay, respawn });
+    });
+
+    channel.on("pvp:tail-eaten", (payload) => {
+      const roomId = sanitizeRoomId(payload?.roomId) ?? getChannelRoomId(channel);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room || room.status !== "started") return;
+      if (room.hostId !== channel.id) return;
+
+      const eaterNum = Number(payload?.eaterNum) || 0;
+      const ownerNum = Number(payload?.ownerNum) || 0;
+      const segIndex = Number(payload?.segIndex);
+      const segValue = Number(payload?.segValue);
+      if (!eaterNum || !ownerNum || eaterNum === ownerNum) return;
+      if (!Number.isInteger(segIndex) || segIndex < 0) return;
+      if (!Number.isFinite(segValue) || segValue <= 0) return;
+
+      const playersList = Array.from(room.players.values());
+      const eater = playersList.find((p) => Number(p?.num) === eaterNum);
+      const owner = playersList.find((p) => Number(p?.num) === ownerNum);
+      if (!eater || !owner) return;
+
+      io.room(roomId).emit("pvp:tail-eaten", { roomId, eaterNum, ownerNum, segIndex, segValue });
+    });
+
+    channel.on("pvp:head-bump", (payload) => {
+      const roomId = sanitizeRoomId(payload?.roomId) ?? getChannelRoomId(channel);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room || room.status !== "started") return;
+      if (room.hostId !== channel.id) return;
+
+      const aNum = Number(payload?.aNum) || 0;
+      const bNum = Number(payload?.bNum) || 0;
+      const nx = Number(payload?.nx);
+      const nz = Number(payload?.nz);
+      const impulse = Number(payload?.impulse);
+      const stunSec = Number(payload?.stunSec);
+      if (!aNum || !bNum || aNum === bNum) return;
+      if (!Number.isFinite(nx) || !Number.isFinite(nz)) return;
+      if (!Number.isFinite(impulse) || impulse <= 0) return;
+      if (!Number.isFinite(stunSec) || stunSec < 0) return;
+
+      const playersList = Array.from(room.players.values());
+      const a = playersList.find((p) => Number(p?.num) === aNum);
+      const b = playersList.find((p) => Number(p?.num) === bNum);
+      if (!a || !b) return;
+
+      io.room(roomId).emit("pvp:head-bump", { roomId, aNum, bNum, nx, nz, impulse, stunSec });
+    });
+
     channel.on("voice:ready", (payload) => {
       const roomId = getChannelRoomId(channel);
       if (!roomId) return;
